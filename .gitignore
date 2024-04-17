@@ -1,0 +1,13 @@
+# Ignorar a pasta do ambiente virtual
+env/
+
+# Ignorar arquivos de configuração do sistema operacional
+Thumbs.db  # Para usuários de Windows
+
+# Ignorar arquivos compilados de Python
+__pycache__/
+*.py[cod]
+
+# Arquivos de configuração do IDE/editor
+.vscode/
+.idea/
