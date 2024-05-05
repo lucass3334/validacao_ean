@@ -1,10 +1,11 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import APIRouter, UploadFile, File, HTTPException
 from fastapi.responses import FileResponse
 import requests
 import pandas as pd
 from bs4 import BeautifulSoup
 
-app = FastAPI()
+router = APIRouter()
+
 
 def buscar_produto_por_ean(ean):
     url = f"https://www.cobasi.com.br/pesquisa?terms={ean}"
@@ -35,7 +36,7 @@ def obter_detalhes_do_produto(url):
     else:
         return None, None
 
-@app.post("/uploadfile/")
+@router.post("/uploadfile/")
 async def create_upload_file(webhook_url: str, file: UploadFile = File(...)):
     df = pd.read_excel(file.file)
     if 'EAN' not in df.columns:
