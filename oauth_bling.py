@@ -8,7 +8,7 @@ router = APIRouter()
 async def get_token(code: str = Body(..., embed=True)):
     url = "https://www.bling.com.br/Api/v3/oauth/token"
     headers = {
-        "Authorization": "Basic YOUR_BASE64_CLIENT_ID_AND_SECRET",
+        "Authorization": "Basic NmY2ZDdjMmY3ZDUzNzA3ODhmNmE4MDVkMjJhOWY0ZjdhNmNiYTUyZTpiNDg1NTdkZjAyNjI4ODFiOTc5ZjM3NmU5YjAyM2FjODZiZGM3ZDdmNzBmNGFhODkzZGI5NGE3MGIzZGY=",
         "Content-Type": "application/x-www-form-urlencoded"
     }
     body = {
