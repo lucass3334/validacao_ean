@@ -49,10 +49,16 @@ def obter_detalhes_do_produto(url):
                 chave = linha.find('div', class_='styles__Name-sc-1ye2cc0-2').text
                 valor = linha.find('div', class_='styles__Values-sc-1ye2cc0-3').text
                 ficha_tecnica[chave] = valor
+        
+        # Captura a descrição detalhada do produto
+        descricao_detalhada = ""
+        descricao_div = soup.find('div', class_='styles__DetailsContainerAccordion-sc-1rue5eb-6')
+        if descricao_div:
+            descricao_detalhada = descricao_div.get_text(separator="\n", strip=True)
 
-        return preco_original, preco_desconto, imagem, ficha_tecnica
+        return preco_original, preco_desconto, imagem, ficha_tecnica, descricao_detalhada
     else:
-        return None, None, None, None
+        return None, None, None, None, None
 
 @router.get("/produto/{ean}")
 async def buscar_produto(ean: str):
@@ -60,7 +66,7 @@ async def buscar_produto(ean: str):
     if html_resultado:
         nome_produto, url_produto = extrair_informacoes_produto(html_resultado)
         if nome_produto and url_produto:
-            preco_original, preco_desconto, imagem, ficha_tecnica = obter_detalhes_do_produto(url_produto)
+            preco_original, preco_desconto, imagem, ficha_tecnica, descricao_detalhada = obter_detalhes_do_produto(url_produto)
             if preco_original and imagem and ficha_tecnica:
                 return {
                     'EAN': ean,
@@ -68,7 +74,8 @@ async def buscar_produto(ean: str):
                     'Preço': preco_original,
                     'Preço de Desconto': preco_desconto,
                     'Link da Imagem': imagem,
-                    'Ficha Técnica': ficha_tecnica
+                    'Ficha Técnica': ficha_tecnica,
+                    'Descrição Detalhada': descricao_detalhada
                 }
             else:
                 return JSONResponse(status_code=404, content={"Erro": "Detalhes do produto não encontrados"})
