@@ -1,7 +1,6 @@
-from fastapi import APIRouter, UploadFile, File, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, HTTPException
+from fastapi.responses import JSONResponse
 import requests
-import pandas as pd
 from bs4 import BeautifulSoup
 
 router = APIRouter()
@@ -30,69 +29,41 @@ def obter_detalhes_do_produto(url):
     if response.status_code == 200:
         soup = BeautifulSoup(response.text, 'html.parser')
         preco = soup.find('span', class_='card-price').text.strip()
-        preco_desconto = soup.find('span', class_='promo-price').text.strip() if soup.find('span', class_='promo-price') else None
+        preco_desconto = soup.find('span', class_='card-price-discount').text.strip() if soup.find('span', class_='card-price-discount') else None
         imagem = soup.find('img', alt='Imagem do Produto')['src']
-        ficha_tecnica = obter_ficha_tecnica(soup)
+        
+        ficha_tecnica = {}
+        ficha_tecnica_div = soup.find('div', class_='MuiCollapse-wrapperInner')
+        if ficha_tecnica_div:
+            linhas = ficha_tecnica_div.find_all('div', class_='styles__Line-sc-1ye2cc0-1')
+            for linha in linhas:
+                chave = linha.find('div', class_='styles__Name-sc-1ye2cc0-2').text
+                valor = linha.find('div', class_='styles__Values-sc-1ye2cc0-3').text
+                ficha_tecnica[chave] = valor
+
         return preco, preco_desconto, imagem, ficha_tecnica
     else:
         return None, None, None, None
 
-def obter_ficha_tecnica(soup):
-    ficha_tecnica = {}
-    ficha_section = soup.find('div', {'aria-labelledby': 'panel1d-header'})
-    if ficha_section:
-        lines = ficha_section.find_all('div', class_='styles__Line-sc-1ye2cc0-1')
-        for line in lines:
-            name = line.find('div', class_='styles__Name-sc-1ye2cc0-2').text.strip()
-            value = line.find('div', class_='styles__Values-sc-1ye2cc0-3').text.strip()
-            ficha_tecnica[name] = value
-    return ficha_tecnica
-
-@router.post("/uploadfile/")
-async def create_upload_file(webhook_url: str, file: UploadFile = File(...)):
-    df = pd.read_excel(file.file)
-    if 'EAN' not in df.columns:
-        raise HTTPException(status_code=400, detail="Excel file must have an 'EAN' column")
-    
-    results = []
-    for ean in df['EAN']:
-        html_resultado = buscar_produto_por_ean(ean)
-        if html_resultado:
-            nome_produto, url_produto = extrair_informacoes_produto(html_resultado)
-            if nome_produto and url_produto:
-                preco, preco_desconto, imagem, ficha_tecnica = obter_detalhes_do_produto(url_produto)
-                if preco and imagem:
-                    results.append({
-                        'EAN': ean,
-                        'Nome do Produto': nome_produto,
-                        'Preço': preco,
-                        'Preço de Desconto': preco_desconto,
-                        'Link da Imagem': imagem,
-                        'Ficha Técnica': ficha_tecnica
-                    })
-                else:
-                    results.append({
-                        'EAN': ean,
-                        'Erro': 'Detalhes do produto não encontrados'
-                    })
-            else:
-                results.append({
+@router.get("/produto/{ean}")
+async def buscar_produto(ean: str):
+    html_resultado = buscar_produto_por_ean(ean)
+    if html_resultado:
+        nome_produto, url_produto = extrair_informacoes_produto(html_resultado)
+        if nome_produto and url_produto:
+            preco, preco_desconto, imagem, ficha_tecnica = obter_detalhes_do_produto(url_produto)
+            if preco and imagem and ficha_tecnica:
+                return {
                     'EAN': ean,
-                    'Erro': 'Produto não encontrado'
-                })
+                    'Nome do Produto': nome_produto,
+                    'Preço': preco,
+                    'Preço de Desconto': preco_desconto,
+                    'Link da Imagem': imagem,
+                    'Ficha Técnica': ficha_tecnica
+                }
+            else:
+                return JSONResponse(status_code=404, content={"Erro": "Detalhes do produto não encontrados"})
         else:
-            results.append({
-                'EAN': ean,
-                'Erro': 'Falha ao acessar a página de resultados'
-            })
-    
-    # Enviar os dados para o webhook como JSON
-    response = requests.post(webhook_url, json=results)
-    if response.status_code == 200:
-        return {"message": "Data sent successfully"}
+            return JSONResponse(status_code=404, content={"Erro": "Produto não encontrado"})
     else:
-        return {
-            "message": "Failed to send data",
-            "status_code": response.status_code,
-            "response_body": response.text
-        }
+        return JSONResponse(status_code=500, content={"Erro": "Falha ao acessar a página de resultados"})
