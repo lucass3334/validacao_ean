@@ -28,10 +28,19 @@ def obter_detalhes_do_produto(url):
     response = requests.get(url)
     if response.status_code == 200:
         soup = BeautifulSoup(response.text, 'html.parser')
-        preco = soup.find('span', class_='card-price').text.strip()
-        preco_desconto = soup.find('span', class_='card-price-discount').text.strip() if soup.find('span', class_='card-price-discount') else None
-        imagem = soup.find('img', alt='Imagem do Produto')['src']
         
+        # Captura o preço original
+        preco_original = soup.find('div', class_='styles__ListPrice-sc-1pw21hb-0')
+        preco_original = preco_original.find('span').text.strip() if preco_original else None
+
+        # Captura o preço de desconto, se disponível
+        preco_desconto = soup.find('span', class_='card-price')
+        preco_desconto = preco_desconto.text.strip() if preco_desconto else None
+        
+        # Captura a imagem do produto
+        imagem = soup.find('img', alt='Imagem do Produto')['src'] if soup.find('img', alt='Imagem do Produto') else None
+        
+        # Captura a ficha técnica
         ficha_tecnica = {}
         ficha_tecnica_div = soup.find('div', class_='MuiCollapse-wrapperInner')
         if ficha_tecnica_div:
@@ -41,7 +50,7 @@ def obter_detalhes_do_produto(url):
                 valor = linha.find('div', class_='styles__Values-sc-1ye2cc0-3').text
                 ficha_tecnica[chave] = valor
 
-        return preco, preco_desconto, imagem, ficha_tecnica
+        return preco_original, preco_desconto, imagem, ficha_tecnica
     else:
         return None, None, None, None
 
@@ -51,12 +60,12 @@ async def buscar_produto(ean: str):
     if html_resultado:
         nome_produto, url_produto = extrair_informacoes_produto(html_resultado)
         if nome_produto and url_produto:
-            preco, preco_desconto, imagem, ficha_tecnica = obter_detalhes_do_produto(url_produto)
-            if preco and imagem and ficha_tecnica:
+            preco_original, preco_desconto, imagem, ficha_tecnica = obter_detalhes_do_produto(url_produto)
+            if preco_original and imagem and ficha_tecnica:
                 return {
                     'EAN': ean,
                     'Nome do Produto': nome_produto,
-                    'Preço': preco,
+                    'Preço': preco_original,
                     'Preço de Desconto': preco_desconto,
                     'Link da Imagem': imagem,
                     'Ficha Técnica': ficha_tecnica
