@@ -6,7 +6,6 @@ from bs4 import BeautifulSoup
 
 router = APIRouter()
 
-
 def buscar_produto_por_ean(ean):
     url = f"https://www.cobasi.com.br/pesquisa?terms={ean}"
     response = requests.get(url)
@@ -31,10 +30,23 @@ def obter_detalhes_do_produto(url):
     if response.status_code == 200:
         soup = BeautifulSoup(response.text, 'html.parser')
         preco = soup.find('span', class_='card-price').text.strip()
+        preco_desconto = soup.find('span', class_='promo-price').text.strip() if soup.find('span', class_='promo-price') else None
         imagem = soup.find('img', alt='Imagem do Produto')['src']
-        return preco, imagem
+        ficha_tecnica = obter_ficha_tecnica(soup)
+        return preco, preco_desconto, imagem, ficha_tecnica
     else:
-        return None, None
+        return None, None, None, None
+
+def obter_ficha_tecnica(soup):
+    ficha_tecnica = {}
+    ficha_section = soup.find('div', {'aria-labelledby': 'panel1d-header'})
+    if ficha_section:
+        lines = ficha_section.find_all('div', class_='styles__Line-sc-1ye2cc0-1')
+        for line in lines:
+            name = line.find('div', class_='styles__Name-sc-1ye2cc0-2').text.strip()
+            value = line.find('div', class_='styles__Values-sc-1ye2cc0-3').text.strip()
+            ficha_tecnica[name] = value
+    return ficha_tecnica
 
 @router.post("/uploadfile/")
 async def create_upload_file(webhook_url: str, file: UploadFile = File(...)):
@@ -48,13 +60,15 @@ async def create_upload_file(webhook_url: str, file: UploadFile = File(...)):
         if html_resultado:
             nome_produto, url_produto = extrair_informacoes_produto(html_resultado)
             if nome_produto and url_produto:
-                preco, imagem = obter_detalhes_do_produto(url_produto)
+                preco, preco_desconto, imagem, ficha_tecnica = obter_detalhes_do_produto(url_produto)
                 if preco and imagem:
                     results.append({
                         'EAN': ean,
                         'Nome do Produto': nome_produto,
                         'Preço': preco,
-                        'Link da Imagem': imagem
+                        'Preço de Desconto': preco_desconto,
+                        'Link da Imagem': imagem,
+                        'Ficha Técnica': ficha_tecnica
                     })
                 else:
                     results.append({
@@ -82,4 +96,3 @@ async def create_upload_file(webhook_url: str, file: UploadFile = File(...)):
             "status_code": response.status_code,
             "response_body": response.text
         }
-
