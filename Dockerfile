@@ -15,14 +15,16 @@ RUN apt-get update && apt-get install -y \
     libu2f-udev \
     xdg-utils
 
-# Install a specific version of Chrome
+# Install the latest stable version of Chrome
 RUN wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | apt-key add - \
     && sh -c 'echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google-chrome.list' \
     && apt-get update \
-    && apt-get install -y google-chrome-stable=113.0.5672.63-1
+    && apt-get install -y google-chrome-stable
 
-# Install the corresponding version of ChromeDriver
-RUN wget -N https://chromedriver.storage.googleapis.com/113.0.5672.63/chromedriver_linux64.zip \
+# Install the corresponding ChromeDriver
+RUN CHROME_VERSION=$(google-chrome --version | grep -oP '\d+\.\d+\.\d+\.\d+' | head -1) \
+    && MAJOR_VERSION=$(echo $CHROME_VERSION | cut -d '.' -f 1-3) \
+    && wget -N https://chromedriver.storage.googleapis.com/$MAJOR_VERSION/chromedriver_linux64.zip \
     && unzip chromedriver_linux64.zip \
     && rm chromedriver_linux64.zip \
     && mv chromedriver /usr/local/bin/chromedriver \
