@@ -3,7 +3,7 @@ from fastapi.responses import JSONResponse
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
-from webdriver_manager.chrome import ChromeDriverManager
+import os
 from bs4 import BeautifulSoup
 
 router = APIRouter()
@@ -14,7 +14,10 @@ def buscar_produto_por_nome(nome):
     options = Options()
     options.add_argument("--headless")
     options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
-    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+
+    # Use ChromeDriver from the system
+    driver_path = "/path/to/chromedriver"  # Update this path to the actual path of ChromeDriver in your environment
+    driver = webdriver.Chrome(service=Service(driver_path), options=options)
     
     driver.get(url)
     html = driver.page_source
@@ -49,7 +52,10 @@ def obter_detalhes_do_produto(url):
     options = Options()
     options.add_argument("--headless")
     options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
-    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+
+    # Use ChromeDriver from the system
+    driver_path = "/path/to/chromedriver"  # Update this path to the actual path of ChromeDriver in your environment
+    driver = webdriver.Chrome(service=Service(driver_path), options=options)
     driver.get(url)
     
     html = driver.page_source
