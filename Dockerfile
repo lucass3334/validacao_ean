@@ -21,9 +21,10 @@ RUN wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | apt-key add
     && apt-get update \
     && apt-get install -y google-chrome-stable
 
-# Install a specific version of ChromeDriver that matches Chrome version 125
-RUN CHROMEDRIVER_VERSION=`curl -sS https://chromedriver.storage.googleapis.com/LATEST_RELEASE_125` \
-    && wget -N https://chromedriver.storage.googleapis.com/$CHROMEDRIVER_VERSION/chromedriver_linux64.zip \
+# Get Chrome version and install corresponding ChromeDriver
+RUN CHROME_VERSION=$(google-chrome --version | awk '{print $3}' | cut -d '.' -f 1) \
+    && CHROMEDRIVER_VERSION=$(curl -sS "https://chromedriver.storage.googleapis.com/LATEST_RELEASE_${CHROME_VERSION}") \
+    && wget -N "https://chromedriver.storage.googleapis.com/${CHROMEDRIVER_VERSION}/chromedriver_linux64.zip" \
     && unzip chromedriver_linux64.zip \
     && rm chromedriver_linux64.zip \
     && mv chromedriver /usr/local/bin/chromedriver \
