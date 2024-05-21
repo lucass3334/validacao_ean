@@ -5,7 +5,8 @@ FROM python:3.11-slim
 RUN apt-get update && apt-get install -y \
     wget \
     gnupg \
-    unzip
+    unzip \
+    curl
 
 # Install Chrome
 RUN wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | apt-key add - \
@@ -18,7 +19,8 @@ RUN CHROMEDRIVER_VERSION=`curl -sS chromedriver.storage.googleapis.com/LATEST_RE
     && wget -N https://chromedriver.storage.googleapis.com/$CHROMEDRIVER_VERSION/chromedriver_linux64.zip \
     && unzip chromedriver_linux64.zip \
     && rm chromedriver_linux64.zip \
-    && mv chromedriver /usr/local/bin/chromedriver
+    && mv chromedriver /usr/local/bin/chromedriver \
+    && chmod +x /usr/local/bin/chromedriver
 
 # Set display port to avoid crash
 ENV DISPLAY=:99
