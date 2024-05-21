@@ -23,10 +23,10 @@ RUN wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | apt-key add
 
 # Install the corresponding ChromeDriver
 RUN wget -N https://storage.googleapis.com/chrome-for-testing-public/125.0.6422.60/linux64/chromedriver-linux64.zip \
-    && unzip chromedriver-linux64.zip \
+    && unzip chromedriver-linux64.zip -d /usr/local/bin/ \
     && rm chromedriver-linux64.zip \
-    && mv chromedriver /usr/local/bin/chromedriver \
-    && chmod +x /usr/local/bin/chromedriver
+    && chmod +x /usr/local/bin/chromedriver-linux64/chromedriver \
+    && ln -s /usr/local/bin/chromedriver-linux64/chromedriver /usr/local/bin/chromedriver
 
 # Set display port to avoid crash
 ENV DISPLAY=:99
