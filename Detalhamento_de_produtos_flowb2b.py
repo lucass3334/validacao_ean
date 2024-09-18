@@ -9,7 +9,7 @@ class EmpresaDetalhamento(BaseModel):
     webhook_url: HttpUrl
 
 API_URL_BASE = "https://asahknimbggpzpoebmej.supabase.co"
-API_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+API_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFzYWhrbmltYmdncHpwb2VibWVqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MTcxODQxNjMsImV4cCI6MjAzMjc2MDE2M30.rYChkMDDU-hdsMK_MxT6tQLCTNj_D6U__jQKIaXCP2U"
 
 def processar_detalhamento(empresa_id: int, webhook_url: str):
     headers = {
