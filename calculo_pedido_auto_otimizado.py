@@ -59,7 +59,7 @@ def fetch_policies(fornecedor_id):
 
 def fetch_products(fornecedor_id):
     url = f"{API_URL_BASE}/rest/v1/rpc/flowb2b_get_produtos_detalhados"
-    payload = {"f_id_param": fornecedor_id}
+    payload = {"f_id": fornecedor_id}
     response = requests.post(url, headers=HEADERS, json=payload)
 
     if response.status_code != 200:
