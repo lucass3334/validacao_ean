@@ -18,7 +18,6 @@ API_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6
 def processar_detalhamento(empresa_id: int, webhook_url: str, data_inicio: Optional[date], data_fim: Optional[date]):
     headers = {
         "apikey": API_KEY,
-        "Authorization": f"Bearer {API_KEY}",
         "Content-Type": "application/json"
     }
 
@@ -30,11 +29,11 @@ def processar_detalhamento(empresa_id: int, webhook_url: str, data_inicio: Optio
         if data_fim:
             filtros += f"&data_emissao=lte.{data_fim}"
 
-        # Filtrar notas fiscais que ainda não foram detalhadas usando 'not=exists.detalhes_nota_fiscal'
-        filtros += "&not=exists.detalhes_nota_fiscal"
+        # Selecionar colunas e incluir junção externa com detalhes_nota_fiscal
+        select_cols = "id,chave_acesso,data_emissao,detalhes_nota_fiscal!left(id)"
 
-        # Selecionar as colunas desejadas
-        select_cols = "id,chave_acesso,data_emissao"
+        # Filtrar notas fiscais que ainda não foram detalhadas (onde detalhes_nota_fiscal.id é null)
+        filtros += "&detalhes_nota_fiscal.id=is.null"
 
         # Construir a URL completa
         notas_url = f"{API_URL_BASE}/rest/v1/notas_fiscais?{filtros}&select={select_cols}"
