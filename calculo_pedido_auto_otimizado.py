@@ -20,8 +20,13 @@ API_KEY = os.getenv("SUPABASE_API_KEY")  # Certifique-se de definir essa variáv
 # Headers comuns para as requisições
 HEADERS = {
     "apikey": API_KEY,
+    "Authorization": f"Bearer {API_KEY}",  # Adicionar o cabeçalho Authorization
     "Content-Type": "application/json"
 }
+
+# Configurar o logger
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 @router.post("")
 async def calcular_pedido(fornecedor: FornecedorID):
@@ -164,101 +169,4 @@ def process_calculation(fornecedor_id, politicas, produtos, produtos_datas):
                 prazo_estoque = politica.get('prazo_estoque') or 0
                 sugestao_quantidade = max((media_venda_dia * prazo_estoque - estoque_atual), 0)
 
-                # Se o estoque atual for zero e a quantidade vendida for maior que zero, sugerir a quantidade vendida no período
-                if estoque_atual == 0 and quantidade_vendida > 0:
-                    sugestao_quantidade = max(sugestao_quantidade, quantidade_vendida)
-
-                # Ajustar a quantidade sugerida com base em itens por caixa
-                sugestao_quantidade = -(-sugestao_quantidade // itens_por_caixa) * itens_por_caixa  # Ceiling division
-
-                if sugestao_quantidade <= 0:
-                    continue  # Ignorar produtos com sugestão zero ou negativa
-
-                # Aplicar multiplicação se o estoque estiver baixo
-                multiplicacao = False
-                if estoque_atual < 2:
-                    sugestao_quantidade = -(- (sugestao_quantidade * 1.2) // 1)  # Ceiling
-                    multiplicacao = True
-
-                # Calcular valores
-                valor_de_compra = produto.get('valor_de_compra') or 0
-                valor_total_produto = sugestao_quantidade * valor_de_compra
-                desconto = politica.get('desconto') or 0
-                valor_total_produto_com_desconto = valor_total_produto * (1 - desconto)
-
-                # Atualizar totais
-                valor_total_pedido += valor_total_produto
-                valor_total_pedido_com_desconto += valor_total_produto_com_desconto
-                quantidade_produtos += 1
-
-                # Adicionar produto ao array
-                produtos_array.append({
-                    'produto_id': produto_id,
-                    'codigo_do_produto': produto.get('codigo_produto'),
-                    'quantidade_vendida': quantidade_vendida,
-                    'periodo_venda': periodo_venda,
-                    'sugestao_quantidade': sugestao_quantidade,
-                    'valor_total_produto': valor_total_produto,
-                    'valor_total_produto_com_desconto': valor_total_produto_com_desconto,
-                    'estoque_atual': estoque_atual,
-                    'data_ultima_venda': data_ultima_venda,
-                    'data_ultima_compra': data_ultima_compra,
-                    'itens_por_caixa': itens_por_caixa,
-                    'multiplicacao_aplicada': multiplicacao
-                })
-            except Exception as e:
-                logger.exception(f"Erro ao processar produto_id {produto_id}")
-                continue
-
-        # Verificar se o valor total atende ao mínimo da política
-        if valor_total_pedido >= (politica.get('valor_minimo') or 0):
-            politica_compra = {
-                'politica_id': politica.get('id'),
-                'desconto': desconto,
-                'bonificacao': politica.get('bonificacao'),
-                'valor_minimo': politica.get('valor_minimo'),
-                'prazo_estoque': prazo_estoque,
-                'melhor_politica': politica.get('id') == melhor_politica_id,
-                'quantidade_produtos': quantidade_produtos,
-                'valor_total_pedido_sem_desconto': valor_total_pedido,
-                'valor_total_pedido_com_desconto': valor_total_pedido_com_desconto,
-                'produtos': produtos_array
-            }
-            resultado.append({'politica_compra': politica_compra})
-
-    return resultado
-
-def find_best_policy(politicas):
-    melhor_desconto = 0
-    menor_prazo = float('inf')
-    melhor_politica_id = None
-    for politica in politicas:
-        desconto = politica.get('desconto') or 0
-        prazo_estoque = politica.get('prazo_estoque') or float('inf')
-        if desconto > melhor_desconto or (desconto == melhor_desconto and prazo_estoque < menor_prazo):
-            melhor_desconto = desconto
-            menor_prazo = prazo_estoque
-            melhor_politica_id = politica.get('id')
-    return melhor_politica_id
-def fetch_quantidade_vendida(produto_id, data_inicio, data_fim):
-    url = f"{API_URL_BASE}/rest/v1/rpc/get_quantidade_vendida"
-    payload = {
-        "produto_id": produto_id,
-        "data_inicio": data_inicio,
-        "data_fim": data_fim
-    }
-    response = requests.post(url, headers=HEADERS, json=payload)
-    if response.status_code != 200:
-        # Você pode adicionar logs ou tratar o erro conforme necessário
-        raise HTTPException(status_code=response.status_code, detail=f"Erro ao buscar quantidade vendida: {response.text}")
-    result = response.json()
-    if result:
-        quantidade_vendida = result[0]['quantidade_vendida']
-    else:
-        quantidade_vendida = 0
-    return quantidade_vendida
-
-
-    except Exception as e:
-        logger.exception(f"Exceção ao buscar quantidade vendida para produto_id {produto_id}")
-        return 0
+    
