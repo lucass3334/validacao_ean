@@ -1,39 +1,60 @@
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, BackgroundTasks
 from pydantic import BaseModel, HttpUrl
 import requests
+from datetime import date
+from typing import Optional
 
 router = APIRouter()
 
 class EmpresaDetalhamento(BaseModel):
     empresa_id: int
     webhook_url: HttpUrl
+    data_inicio: Optional[date] = None
+    data_fim: Optional[date] = None
 
 API_URL_BASE = "https://asahknimbggpzpoebmej.supabase.co"
 API_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFzYWhrbmltYmdncHpwb2VibWVqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MTcxODQxNjMsImV4cCI6MjAzMjc2MDE2M30.rYChkMDDU-hdsMK_MxT6tQLCTNj_D6U__jQKIaXCP2U"
 
-def processar_detalhamento(empresa_id: int, webhook_url: str):
+def processar_detalhamento(empresa_id: int, webhook_url: str, data_inicio: Optional[date], data_fim: Optional[date]):
     headers = {
         "apikey": API_KEY,
+        "Authorization": f"Bearer {API_KEY}",
         "Content-Type": "application/json"
     }
 
     try:
-        # Obter todas as chaves de acesso
-        notas_url = f"{API_URL_BASE}/rest/v1/notas_fiscais?empresa_id=eq.{empresa_id}&select=chave_acesso"
+        # Construir filtros
+        filtros = f"empresa_id=eq.{empresa_id}"
+        if data_inicio and data_fim:
+            filtros += f"&data_emissao=gte.{data_inicio}&data_emissao=lte.{data_fim}"
+        elif data_inicio:
+            filtros += f"&data_emissao=gte.{data_inicio}"
+        elif data_fim:
+            filtros += f"&data_emissao=lte.{data_fim}"
+
+        # Selecionar as colunas desejadas
+        select_cols = "id,chave_acesso,data_emissao"
+
+        # Filtrar notas fiscais que ainda não foram detalhadas usando 'not.existing'
+        filtros += f"&not.existing=detalhes_nota_fiscal"
+
+        # Obter todas as notas fiscais que ainda não foram detalhadas
+        notas_url = f"{API_URL_BASE}/rest/v1/notas_fiscais?{filtros}&select={select_cols}"
         response = requests.get(notas_url, headers=headers)
 
         if response.status_code != 200:
-            raise Exception("Erro ao buscar notas fiscais")
+            raise Exception(f"Erro ao buscar notas fiscais: {response.status_code} - {response.text}")
 
         notas = response.json()
         if not notas:
-            result = {"message": "Nenhuma nota fiscal encontrada"}
+            result = {"message": "Nenhuma nota fiscal encontrada para processamento"}
         else:
             for nota in notas:
                 chave_acesso = nota.get("chave_acesso")
-                if not chave_acesso:
-                    continue
+                nota_id = nota.get("id")
+                data_emissao = nota.get("data_emissao")
 
+                # Processar a nota
                 payload = {
                     "chave_acesso": chave_acesso,
                     "empresa_id": empresa_id
@@ -44,6 +65,7 @@ def processar_detalhamento(empresa_id: int, webhook_url: str):
                 if detalhes_response.status_code != 200:
                     # Registrar o erro conforme necessário
                     continue
+
             result = {"message": "Detalhamento de produtos concluído com sucesso"}
 
         # Enviar notificação para o webhook_url
@@ -56,5 +78,11 @@ def processar_detalhamento(empresa_id: int, webhook_url: str):
 
 @router.post("/")
 async def detalhar_produtos(empresa: EmpresaDetalhamento, background_tasks: BackgroundTasks):
-    background_tasks.add_task(processar_detalhamento, empresa_id=empresa.empresa_id, webhook_url=str(empresa.webhook_url))
+    background_tasks.add_task(
+        processar_detalhamento,
+        empresa_id=empresa.empresa_id,
+        webhook_url=str(empresa.webhook_url),
+        data_inicio=empresa.data_inicio,
+        data_fim=empresa.data_fim
+    )
     return {"message": "Processamento iniciado, você será notificado quando concluído via webhook"}
