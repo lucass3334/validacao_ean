@@ -240,22 +240,25 @@ def find_best_policy(politicas):
             menor_prazo = prazo_estoque
             melhor_politica_id = politica.get('id')
     return melhor_politica_id
-
 def fetch_quantidade_vendida(produto_id, data_inicio, data_fim):
-    try:
-        url = f"{API_URL_BASE}/rest/v1/rpc/get_quantidade_vendida"
-        payload = {
-            "produto_id": produto_id,
-            "data_inicio": data_inicio,
-            "data_fim": data_fim
-        }
-        response = requests.post(url, headers=HEADERS, json=payload)
-        if response.status_code != 200:
-            logger.error(f"Erro ao buscar quantidade vendida para produto_id {produto_id}: {response.text}")
-            return 0
-        vendas = response.json()
-        quantidade_vendida = vendas.get('quantidade_vendida', 0)
-        return quantidade_vendida
+    url = f"{API_URL_BASE}/rest/v1/rpc/get_quantidade_vendida"
+    payload = {
+        "produto_id": produto_id,
+        "data_inicio": data_inicio,
+        "data_fim": data_fim
+    }
+    response = requests.post(url, headers=HEADERS, json=payload)
+    if response.status_code != 200:
+        # Você pode adicionar logs ou tratar o erro conforme necessário
+        raise HTTPException(status_code=response.status_code, detail=f"Erro ao buscar quantidade vendida: {response.text}")
+    result = response.json()
+    if result:
+        quantidade_vendida = result[0]['quantidade_vendida']
+    else:
+        quantidade_vendida = 0
+    return quantidade_vendida
+
+
     except Exception as e:
         logger.exception(f"Exceção ao buscar quantidade vendida para produto_id {produto_id}")
         return 0
