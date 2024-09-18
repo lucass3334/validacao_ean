@@ -25,21 +25,20 @@ def processar_detalhamento(empresa_id: int, webhook_url: str, data_inicio: Optio
     try:
         # Construir filtros
         filtros = f"empresa_id=eq.{empresa_id}"
-        if data_inicio and data_fim:
-            filtros += f"&data_emissao=gte.{data_inicio}&data_emissao=lte.{data_fim}"
-        elif data_inicio:
+        if data_inicio:
             filtros += f"&data_emissao=gte.{data_inicio}"
-        elif data_fim:
+        if data_fim:
             filtros += f"&data_emissao=lte.{data_fim}"
 
-        # Selecionar as colunas desejadas
-        select_cols = "id,chave_acesso,data_emissao"
+        # Selecionar colunas e incluir junção externa com detalhes_nota_fiscal
+        select_cols = "id,chave_acesso,data_emissao,detalhes_nota_fiscal!left(id)"
 
-        # Filtrar notas fiscais que ainda não foram detalhadas usando 'not.existing'
-        filtros += f"&not.existing=detalhes_nota_fiscal"
+        # Filtrar notas fiscais que ainda não foram detalhadas (onde detalhes_nota_fiscal.id é null)
+        filtros += "&detalhes_nota_fiscal.id=is.null"
 
-        # Obter todas as notas fiscais que ainda não foram detalhadas
+        # Construir a URL completa
         notas_url = f"{API_URL_BASE}/rest/v1/notas_fiscais?{filtros}&select={select_cols}"
+
         response = requests.get(notas_url, headers=headers)
 
         if response.status_code != 200:
