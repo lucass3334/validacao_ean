@@ -118,10 +118,9 @@ def fetch_produto_datas(produto_ids):
         raise
 
 def process_calculation(fornecedor_id, politicas, produtos, produtos_datas):
-    # Encontrar a melhor política
     melhor_politica_id = find_best_policy(politicas)
-
     resultado = []
+
     for politica in politicas:
         produtos_array = []
         valor_total_pedido = 0
@@ -132,31 +131,53 @@ def process_calculation(fornecedor_id, politicas, produtos, produtos_datas):
             try:
                 produto_id = produto['produto_id']
                 data_info = produtos_datas.get(produto_id, {})
-                data_ultima_venda = data_info.get('data_ultima_venda')
-                data_ultima_compra = data_info.get('data_ultima_compra')
+                data_ultima_venda_str = data_info.get('data_ultima_venda')
+                data_ultima_compra_str = data_info.get('data_ultima_compra')
 
-                # Lógica de cálculo conforme a função original
                 # Ignorar produtos sem data de última venda
-                if data_ultima_venda is None:
+                if data_ultima_venda_str is None:
                     continue  # Produto sem giro ignorado
 
-                # Se data_ultima_compra for nula, definir como data_ultima_venda - 365 dias
-                if data_ultima_compra is None:
-                    data_ultima_compra_dt = parser.isoparse(data_ultima_venda) - timedelta(days=365)
-                    data_ultima_compra = data_ultima_compra_dt.isoformat()
-                else:
-                    data_ultima_compra_dt = parser.isoparse(data_ultima_compra)
+                # Converter strings para objetos datetime
+                data_ultima_venda = parser.isoparse(data_ultima_venda_str).date()
 
-                data_venda_dt = parser.isoparse(data_ultima_venda)
+                # Se data_ultima_venda estiver no futuro, ajustar para data atual
+                if data_ultima_venda > datetime.now().date():
+                    data_ultima_venda = datetime.now().date()
+
+                # Se data_ultima_compra for nula, definir como data_ultima_venda - 365 dias
+                if data_ultima_compra_str is None:
+                    data_ultima_compra = data_ultima_venda - timedelta(days=365)
+                else:
+                    data_ultima_compra = parser.isoparse(data_ultima_compra_str).date()
+
+                # Se data_ultima_compra estiver no futuro, ajustar para data atual
+                if data_ultima_compra > datetime.now().date():
+                    data_ultima_compra = datetime.now().date()
+
+                # Se data_ultima_compra for após data_ultima_venda, ajustar para data_ultima_venda - 1 dia
+                if data_ultima_compra > data_ultima_venda:
+                    data_ultima_compra = data_ultima_venda - timedelta(days=1)
 
                 # Calcular periodo_venda
-                periodo_venda = (data_venda_dt - data_ultima_compra_dt).days
+                periodo_venda = (data_ultima_venda - data_ultima_compra).days
 
                 if periodo_venda <= 0:
                     periodo_venda = 1  # Evitar divisão por zero
 
+                logger.debug(f"Produto ID: {produto_id}")
+                logger.debug(f"Data Última Venda: {data_ultima_venda}")
+                logger.debug(f"Data Última Compra: {data_ultima_compra}")
+                logger.debug(f"Período de Venda: {periodo_venda} dias")
+
                 # Calcular quantidade_vendida no período
-                quantidade_vendida = fetch_quantidade_vendida(produto_id, data_ultima_compra_dt.isoformat(), data_venda_dt.isoformat())
+                quantidade_vendida = fetch_quantidade_vendida(
+                    produto_id,
+                    data_ultima_compra.isoformat(),
+                    data_ultima_venda.isoformat()
+                )
+
+                logger.debug(f"Quantidade Vendida: {quantidade_vendida}")
 
                 # Calcular média de vendas diárias
                 media_venda_dia = quantidade_vendida / periodo_venda
@@ -167,14 +188,16 @@ def process_calculation(fornecedor_id, politicas, produtos, produtos_datas):
                 # Calcular sugestão de quantidade
                 estoque_atual = produto.get('estoque_atual') or 0
                 prazo_estoque = politica.get('prazo_estoque') or 0
-                sugestao_quantidade = max((media_venda_dia * prazo_estoque - estoque_atual), 0)
+                sugestao_quantidade = max(
+                    (media_venda_dia * prazo_estoque - estoque_atual), 0)
 
                 # Se o estoque atual for zero e a quantidade vendida for maior que zero, sugerir a quantidade vendida no período
                 if estoque_atual == 0 and quantidade_vendida > 0:
                     sugestao_quantidade = max(sugestao_quantidade, quantidade_vendida)
 
                 # Ajustar a quantidade sugerida com base em itens por caixa
-                sugestao_quantidade = -(-sugestao_quantidade // itens_por_caixa) * itens_por_caixa  # Ceiling division
+                sugestao_quantidade = -(
+                    -sugestao_quantidade // itens_por_caixa) * itens_por_caixa  # Arredondar para cima
 
                 if sugestao_quantidade <= 0:
                     continue  # Ignorar produtos com sugestão zero ou negativa
@@ -182,7 +205,7 @@ def process_calculation(fornecedor_id, politicas, produtos, produtos_datas):
                 # Aplicar multiplicação se o estoque estiver baixo
                 multiplicacao = False
                 if estoque_atual < 2:
-                    sugestao_quantidade = -(- (sugestao_quantidade * 1.2) // 1)  # Ceiling
+                    sugestao_quantidade = -(- (sugestao_quantidade * 1.2) // 1)
                     multiplicacao = True
 
                 # Calcular valores
@@ -206,8 +229,8 @@ def process_calculation(fornecedor_id, politicas, produtos, produtos_datas):
                     'valor_total_produto': valor_total_produto,
                     'valor_total_produto_com_desconto': valor_total_produto_com_desconto,
                     'estoque_atual': estoque_atual,
-                    'data_ultima_venda': data_ultima_venda,
-                    'data_ultima_compra': data_ultima_compra,
+                    'data_ultima_venda': data_ultima_venda.isoformat(),
+                    'data_ultima_compra': data_ultima_compra.isoformat(),
                     'itens_por_caixa': itens_por_caixa,
                     'multiplicacao_aplicada': multiplicacao
                 })
@@ -233,6 +256,7 @@ def process_calculation(fornecedor_id, politicas, produtos, produtos_datas):
 
     return resultado
 
+
 def find_best_policy(politicas):
     melhor_desconto = 0
     menor_prazo = float('inf')
@@ -248,6 +272,7 @@ def find_best_policy(politicas):
 
 def fetch_quantidade_vendida(produto_id, data_inicio, data_fim):
     try:
+        logger.debug(f"Buscando quantidade vendida para produto_id {produto_id} entre {data_inicio} e {data_fim}")
         url = f"{API_URL_BASE}/rest/v1/rpc/get_quantidade_vendida"
         payload = {
             "produto_id": produto_id,
@@ -256,14 +281,16 @@ def fetch_quantidade_vendida(produto_id, data_inicio, data_fim):
         }
         response = requests.post(url, headers=HEADERS, json=payload)
         if response.status_code != 200:
-            # Você pode adicionar logs ou tratar o erro conforme necessário
+            logger.error(f"Erro ao buscar quantidade vendida: {response.text}")
             raise HTTPException(status_code=response.status_code, detail=f"Erro ao buscar quantidade vendida: {response.text}")
         result = response.json()
         if result:
-            quantidade_vendida = result[0]['quantidade_vendida']
+            quantidade_vendida = float(result[0]['quantidade_vendida'])
         else:
             quantidade_vendida = 0
+        logger.debug(f"Quantidade vendida para produto_id {produto_id}: {quantidade_vendida}")
         return quantidade_vendida
     except Exception as e:
         logger.exception(f"Exceção ao buscar quantidade vendida para produto_id {produto_id}")
         return 0
+
