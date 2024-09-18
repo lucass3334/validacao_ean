@@ -27,7 +27,7 @@ def processar_vinculo(empresa_id: int, webhook_url: str):
 
         fornecedores = response.json()
         if not fornecedores:
-            result = {"message": "Nenhum fornecedor encontrado"}
+            result = {"message": "Nenhum fornecedor encontrado", "relevante": False, "empresa_id": empresa_id}
         else:
             for fornecedor in fornecedores:
                 fornecedor_id = fornecedor.get("id")
@@ -44,13 +44,13 @@ def processar_vinculo(empresa_id: int, webhook_url: str):
                 if update_response.status_code != 200:
                     # Registrar o erro conforme necessário
                     continue
-            result = {"message": "Vínculo de produtos por fornecedor concluído com sucesso"}
+            result = {"message": "Vínculo de produtos por fornecedor concluído com sucesso", "relevante": True, "empresa_id": empresa_id}
 
         # Enviar notificação para o webhook_url
         requests.post(webhook_url, json=result)
 
     except Exception as e:
-        error_message = {"error": str(e)}
+        error_message = {"error": str(e), "relevante": False, "empresa_id": empresa_id}
         # Enviar notificação de erro para o webhook_url
         requests.post(webhook_url, json=error_message)
 
