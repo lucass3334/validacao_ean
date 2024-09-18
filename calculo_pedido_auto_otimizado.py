@@ -67,45 +67,23 @@ def fetch_products(fornecedor_id):
     return response.json()
 
 def fetch_produto_datas(produto_ids):
-    # Montar filtro para os produtos
-    produto_ids_str = ','.join(map(str, produto_ids))
-
     # Buscar datas de última venda
-    url_vendas = f"{API_URL_BASE}/rest/v1/itens_pedido_venda"
-    params_vendas = {
-        "select": "produto_id,max_data_saida:pv(data_saida)",
-        "produto_id": f"in.({produto_ids_str})",
-        "groupby": "produto_id"
-    }
-    response_vendas = requests.get(url_vendas, headers=HEADERS, params=params_vendas)
+    url_vendas = f"{API_URL_BASE}/rest/v1/rpc/get_max_data_saida"
+    payload_vendas = {"produto_ids": produto_ids}
+    response_vendas = requests.post(url_vendas, headers=HEADERS, json=payload_vendas)
     if response_vendas.status_code != 200:
         raise HTTPException(status_code=response_vendas.status_code, detail=f"Erro ao buscar datas de última venda: {response_vendas.text}")
     vendas_data = response_vendas.json()
-
-    # Organizar dados de vendas
-    data_ultima_venda = {item['produto_id']: item['max_data_saida']['data_saida'] for item in vendas_data if item['max_data_saida']}
+    data_ultima_venda = {item['produto_id']: item['max_data_saida'] for item in vendas_data}
 
     # Buscar datas de última compra
-    url_compras = f"{API_URL_BASE}/rest/v1/produtos_detalhes_nota_fiscal"
-    params_compras = {
-        "select": "produto_id,max_data_compra:dnf(dh_sai_ent,dh_emi)",
-        "produto_id": f"in.({produto_ids_str})",
-        "groupby": "produto_id"
-    }
-    response_compras = requests.get(url_compras, headers=HEADERS, params=params_compras)
+    url_compras = f"{API_URL_BASE}/rest/v1/rpc/get_max_data_compra"
+    payload_compras = {"produto_ids": produto_ids}
+    response_compras = requests.post(url_compras, headers=HEADERS, json=payload_compras)
     if response_compras.status_code != 200:
         raise HTTPException(status_code=response_compras.status_code, detail=f"Erro ao buscar datas de última compra: {response_compras.text}")
     compras_data = response_compras.json()
-
-    # Organizar dados de compras
-    data_ultima_compra = {}
-    for item in compras_data:
-        produto_id = item['produto_id']
-        dh_sai_ent = item['max_data_compra'].get('dh_sai_ent')
-        dh_emi = item['max_data_compra'].get('dh_emi')
-        data_compra = dh_sai_ent or dh_emi
-        if data_compra:
-            data_ultima_compra[produto_id] = data_compra
+    data_ultima_compra = {item['produto_id']: item['max_data_compra'] for item in compras_data}
 
     # Combinar dados
     produtos_datas = {}
