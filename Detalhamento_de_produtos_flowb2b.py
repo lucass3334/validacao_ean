@@ -45,7 +45,7 @@ def processar_detalhamento(empresa_id: int, webhook_url: str, data_inicio: Optio
 
         notas = response.json()
         if not notas:
-            result = {"message": "Nenhuma nota fiscal encontrada para processamento"}
+            result = {"message": "Nenhuma nota fiscal encontrada para processamento", "relevante": False, "empresa_id": empresa_id}
         else:
             for nota in notas:
                 chave_acesso = nota.get("chave_acesso")
@@ -64,13 +64,13 @@ def processar_detalhamento(empresa_id: int, webhook_url: str, data_inicio: Optio
                     # Registrar o erro conforme necessário
                     continue
 
-            result = {"message": "Detalhamento de produtos concluído com sucesso"}
+            result = {"message": "Detalhamento de produtos concluído com sucesso", "relevante": True, "empresa_id": empresa_id}
 
         # Enviar notificação para o webhook_url
         requests.post(webhook_url, json=result)
 
     except Exception as e:
-        error_message = {"error": str(e)}
+        error_message = {"error": str(e), "relevante": False, "empresa_id": empresa_id}
         # Enviar notificação de erro para o webhook_url
         requests.post(webhook_url, json=error_message)
 
