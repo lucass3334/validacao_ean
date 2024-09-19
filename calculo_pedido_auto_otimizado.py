@@ -156,6 +156,12 @@ def process_calculation(politicas: Dict, produtos: Dict, produtos_datas: Dict) -
             # Calcular período de venda
             data_ultima_venda = ajustar_data_futura(parser.isoparse(data_ultima_venda_str).date())
             data_ultima_compra = ajustar_data_compra(data_ultima_compra_str, data_ultima_venda)
+            
+            # Se a data de compra for maior que a de venda, ignore o produto
+            if data_ultima_compra >= data_ultima_venda:
+                logger.warning(f"Ignorando produto_id {produto_id} com datas incoerentes: compra posterior à venda")
+                continue
+
             periodo_venda = max((data_ultima_venda - data_ultima_compra).days, 1)
 
             # Buscar a quantidade vendida
@@ -194,7 +200,7 @@ def ajustar_data_futura(data: datetime) -> datetime:
 
 def ajustar_data_compra(data_ultima_compra_str: str, data_ultima_venda: datetime) -> datetime:
     if not data_ultima_compra_str:
-        return data_ultima_venda - timedelta(days=365)
+        return datetime.now().date() - timedelta(days=365)  # Data de compra nula: 1 ano atrás
     data_ultima_compra = parser.isoparse(data_ultima_compra_str).date()
     return min(data_ultima_compra, data_ultima_venda - timedelta(days=1))
 
