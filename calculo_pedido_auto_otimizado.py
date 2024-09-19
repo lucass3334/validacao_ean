@@ -126,11 +126,26 @@ def fetch_max_data_compra(produto_ids: list) -> Dict:
     compras_data = response.json()
     return {item['produto_id']: item['max_data_compra'] for item in compras_data}
 
+# Função adicional para buscar id_produto_bling para cada produto
+def fetch_id_produto_bling(produto_id: int) -> int:
+    url = f"{API_URL_BASE}/rest/v1/produtos?id=eq.{produto_id}"
+    response = requests.get(url, headers=HEADERS)
+
+    if response.status_code != 200:
+        logger.error(f"Erro ao buscar id_produto_bling: {response.text}")
+        raise HTTPException(status_code=response.status_code, detail="Erro ao buscar id_produto_bling")
+
+    result = response.json()
+    return result[0]['id_produto_bling'] if result else None
+
 def process_calculation(politicas: Dict, produtos: Dict, produtos_datas: Dict) -> list:
     resultado = []
     melhor_politica_id = find_best_policy(politicas)
 
     produtos_processados = set()
+
+    # Variável acumuladora de valores dos produtos
+    soma_valor_produtos = 0
 
     for politica in politicas:
         produtos_array = []
@@ -186,14 +201,18 @@ def process_calculation(politicas: Dict, produtos: Dict, produtos_datas: Dict) -
             valor_total_pedido += valor_total_produto
             valor_total_pedido_com_desconto += valor_total_produto_com_desconto
             quantidade_produtos += 1
+            soma_valor_produtos += valor_total_produto  # Atualiza o acumulador
+
+            # Buscar id_produto_bling
+            id_produto_bling = fetch_id_produto_bling(produto_id)
 
             # Adicionar produto ao array de resultado
-            produtos_array.append(montar_detalhes_produto(produto, quantidade_vendida, periodo_venda, sugestao_quantidade, valor_total_produto, valor_total_produto_com_desconto, multiplicacao))
+            produtos_array.append(montar_detalhes_produto(produto, quantidade_vendida, periodo_venda, sugestao_quantidade, valor_total_produto, valor_total_produto_com_desconto, multiplicacao, id_produto_bling))
 
         # Verificar se o valor total atende ao mínimo da política
         if valor_total_pedido >= (politica.get('valor_minimo') or 0):
             politica_compra = montar_politica_compra(politica, valor_total_pedido, valor_total_pedido_com_desconto, quantidade_produtos, melhor_politica_id, produtos_array)
-            resultado.append(politica_compra)  # Adiciona TODAS as políticas válidas ao resultado
+            resultado.append(politica_compra)
 
     return resultado
 
@@ -246,7 +265,8 @@ def calcular_valores(produto: Dict, politica: Dict, sugestao_quantidade: float) 
     valor_total_produto_com_desconto = valor_total_produto * (1 - desconto)
     return valor_total_produto, valor_total_produto_com_desconto
 
-def montar_detalhes_produto(produto: Dict, quantidade_vendida: float, periodo_venda: int, sugestao_quantidade: float, valor_total_produto: float, valor_total_produto_com_desconto: float, multiplicacao: bool) -> Dict:
+# Atualização para incluir id_produto_bling
+def montar_detalhes_produto(produto: Dict, quantidade_vendida: float, periodo_venda: int, sugestao_quantidade: float, valor_total_produto: float, valor_total_produto_com_desconto: float, multiplicacao: bool, id_produto_bling: int) -> Dict:
     return {
         'produto_id': produto['produto_id'],
         'codigo_do_produto': produto.get('codigo_produto'),
@@ -259,7 +279,8 @@ def montar_detalhes_produto(produto: Dict, quantidade_vendida: float, periodo_ve
         'data_ultima_venda': produto.get('data_ultima_venda'),
         'data_ultima_compra': produto.get('data_ultima_compra'),
         'itens_por_caixa': produto.get('itens_por_caixa') or 1,
-        'multiplicacao_aplicada': multiplicacao
+        'multiplicacao_aplicada': multiplicacao,
+        'id_produto_bling': id_produto_bling  # Adicionando a chave id_produto_bling
     }
 
 def montar_politica_compra(politica: Dict, valor_total_pedido: float, valor_total_pedido_com_desconto: float, quantidade_produtos: int, melhor_politica_id: int, produtos_array: list) -> Dict:
