@@ -201,7 +201,7 @@ def ajustar_data_compra(data_ultima_compra_str: str, data_ultima_venda: datetime
 def fetch_quantidade_vendida(produto_id: int, data_inicio: str, data_fim: str) -> float:
     url = f"{API_URL_BASE}/rest/v1/rpc/get_quantidade_vendida"
     payload = {
-        "produto_id": produto_id,
+        "p_produto_id": produto_id,
         "data_inicio": data_inicio,
         "data_fim": data_fim
     }
