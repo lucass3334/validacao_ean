@@ -7,6 +7,7 @@ import os
 import logging
 from dateutil import parser
 
+
 router = APIRouter()
 
 # Configurações da API do Supabase
@@ -148,17 +149,21 @@ def process_calculation(politicas: Dict, produtos: Dict, produtos_datas: Dict) -
             data_ultima_venda_str = data_info.get('data_ultima_venda')
             data_ultima_compra_str = data_info.get('data_ultima_compra')
 
+            # Descartar o produto o quanto antes se a data de compra for posterior à de venda
+            if data_ultima_compra_str and data_ultima_venda_str:
+                data_ultima_venda = parser.isoparse(data_ultima_venda_str).date()
+                data_ultima_compra = parser.isoparse(data_ultima_compra_str).date()
+
+                if data_ultima_compra >= data_ultima_venda:
+                    logger.warning(f"Ignorando produto_id {produto_id}: data de compra posterior ou igual à venda.")
+                    continue  # Ignorar produtos com datas inválidas
+
             if not data_ultima_venda_str:
                 continue  # Ignorar produtos sem última venda
 
             # Calcular período de venda
             data_ultima_venda = ajustar_data_futura(parser.isoparse(data_ultima_venda_str).date())
             data_ultima_compra = ajustar_data_compra(data_ultima_compra_str, data_ultima_venda)
-            
-            # Se a data de compra for maior ou igual à data de venda, ignore o produto
-            if data_ultima_compra >= data_ultima_venda:
-                logger.warning(f"Ignorando produto_id {produto_id}: data de compra posterior ou igual à venda.")
-                continue
 
             periodo_venda = max((data_ultima_venda - data_ultima_compra).days, 1)
 
@@ -281,7 +286,7 @@ def find_best_policy(politicas: Dict) -> int:
         desconto = politica.get('desconto') or 0
         prazo_estoque = politica.get('prazo_estoque') or float('inf')
 
-        if desconto > melhor_desconto or (desconto == melhor_desconto and prazo_estoque < menor_prazo):
+        if desconto > melhor_desconto or (desconto == melhor_desconto e prazo_estoque < menor_prazo):
             melhor_desconto = desconto
             menor_prazo = prazo_estoque
             melhor_politica_id = politica.get('id')
