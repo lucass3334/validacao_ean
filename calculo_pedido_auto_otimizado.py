@@ -1,11 +1,12 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import Dict
+from typing import Dict, List
 import requests
 from datetime import datetime, timedelta
 import os
 import logging
 from dateutil import parser
+
 
 router = APIRouter()
 
@@ -61,7 +62,7 @@ async def calcular_pedido(fornecedor: FornecedorID):
         logger.exception("Erro desconhecido.")
         raise HTTPException(status_code=500, detail=str(e))
 
-def fetch_policies(fornecedor_id: int) -> Dict:
+def fetch_policies(fornecedor_id: int) -> List[Dict]:
     url = f"{API_URL_BASE}/rest/v1/rpc/flowb2b_fetch_politica_compra"
     payload = {"f_id": fornecedor_id}
     response = requests.post(url, headers=HEADERS, json=payload)
@@ -72,7 +73,7 @@ def fetch_policies(fornecedor_id: int) -> Dict:
 
     return response.json()
 
-def fetch_products(fornecedor_id: int) -> Dict:
+def fetch_products(fornecedor_id: int) -> List[Dict]:
     url = f"{API_URL_BASE}/rest/v1/rpc/flowb2b_get_produtos_detalhados"
     payload = {"f_id": fornecedor_id}
     response = requests.post(url, headers=HEADERS, json=payload)
@@ -138,14 +139,12 @@ def fetch_id_produto_bling(produto_id: int) -> int:
     result = response.json()
     return result[0]['id_produto_bling'] if result else None
 
-def process_calculation(politicas: Dict, produtos: Dict, produtos_datas: Dict) -> list:
+def process_calculation(politicas: List[Dict], produtos: List[Dict], produtos_datas: Dict) -> list:
     resultado = []
     melhor_politica_id = find_best_policy(politicas)
 
-    produtos_processados = set()
-
     # Variável acumuladora de valores dos produtos
-    soma_valor_produtos = 0
+    soma_valor_produtos_por_politica = {politica['id']: 0 for politica in politicas}
 
     for politica in politicas:
         produtos_array = []
@@ -155,10 +154,7 @@ def process_calculation(politicas: Dict, produtos: Dict, produtos_datas: Dict) -
 
         for produto in produtos:
             produto_id = produto['produto_id']
-            if produto_id in produtos_processados:
-                continue
 
-            produtos_processados.add(produto_id)
             data_info = produtos_datas.get(produto_id, {})
             data_ultima_venda_str = data_info.get('data_ultima_venda')
             data_ultima_compra_str = data_info.get('data_ultima_compra')
@@ -201,7 +197,6 @@ def process_calculation(politicas: Dict, produtos: Dict, produtos_datas: Dict) -
             valor_total_pedido += valor_total_produto
             valor_total_pedido_com_desconto += valor_total_produto_com_desconto
             quantidade_produtos += 1
-            soma_valor_produtos += valor_total_produto  # Atualiza o acumulador
 
             # Buscar id_produto_bling
             id_produto_bling = fetch_id_produto_bling(produto_id)
@@ -209,9 +204,12 @@ def process_calculation(politicas: Dict, produtos: Dict, produtos_datas: Dict) -
             # Adicionar produto ao array de resultado
             produtos_array.append(montar_detalhes_produto(produto, quantidade_vendida, periodo_venda, sugestao_quantidade, valor_total_produto, valor_total_produto_com_desconto, multiplicacao, id_produto_bling))
 
-        # Verificar se o valor total atende ao mínimo da política
+        # Atualizar o somatório de valores por política
+        soma_valor_produtos_por_politica[politica['id']] += valor_total_pedido
+
+        # Adicionar política apenas se o valor total do pedido for maior que o mínimo
         if valor_total_pedido >= (politica.get('valor_minimo') or 0):
-            politica_compra = montar_politica_compra(politica, valor_total_pedido, valor_total_pedido_com_desconto, quantidade_produtos, melhor_politica_id, produtos_array)
+            politica_compra = montar_politica_compra(politica, valor_total_pedido, valor_total_pedido_com_desconto, quantidade_produtos, politica['id'] == melhor_politica_id, produtos_array)
             resultado.append(politica_compra)
 
     return resultado
@@ -265,7 +263,6 @@ def calcular_valores(produto: Dict, politica: Dict, sugestao_quantidade: float) 
     valor_total_produto_com_desconto = valor_total_produto * (1 - desconto)
     return valor_total_produto, valor_total_produto_com_desconto
 
-# Atualização para incluir id_produto_bling
 def montar_detalhes_produto(produto: Dict, quantidade_vendida: float, periodo_venda: int, sugestao_quantidade: float, valor_total_produto: float, valor_total_produto_com_desconto: float, multiplicacao: bool, id_produto_bling: int) -> Dict:
     return {
         'produto_id': produto['produto_id'],
@@ -283,21 +280,21 @@ def montar_detalhes_produto(produto: Dict, quantidade_vendida: float, periodo_ve
         'id_produto_bling': id_produto_bling  # Adicionando a chave id_produto_bling
     }
 
-def montar_politica_compra(politica: Dict, valor_total_pedido: float, valor_total_pedido_com_desconto: float, quantidade_produtos: int, melhor_politica_id: int, produtos_array: list) -> Dict:
+def montar_politica_compra(politica: Dict, valor_total_pedido: float, valor_total_pedido_com_desconto: float, quantidade_produtos: int, melhor_politica: bool, produtos_array: list) -> Dict:
     return {
         'politica_id': politica.get('id'),
         'desconto': politica.get('desconto'),
         'bonificacao': politica.get('bonificacao'),
         'valor_minimo': politica.get('valor_minimo'),
         'prazo_estoque': politica.get('prazo_estoque'),
-        'melhor_politica': politica.get('id') == melhor_politica_id,
+        'melhor_politica': melhor_politica,
         'quantidade_produtos': quantidade_produtos,
         'valor_total_pedido_sem_desconto': valor_total_pedido,
         'valor_total_pedido_com_desconto': valor_total_pedido_com_desconto,
         'produtos': produtos_array
     }
 
-def find_best_policy(politicas: Dict) -> int:
+def find_best_policy(politicas: List[Dict]) -> int:
     melhor_desconto = 0
     menor_prazo = float('inf')
     melhor_politica_id = None
