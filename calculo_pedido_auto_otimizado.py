@@ -7,7 +7,6 @@ import os
 import logging
 from dateutil import parser
 
-
 router = APIRouter()
 
 # Configurações da API do Supabase
@@ -86,12 +85,11 @@ def fetch_products(fornecedor_id: int) -> Dict:
 
 def fetch_produto_datas(produto_ids: list) -> Dict:
     try:
-        # Fetch last sales dates
+        # Buscar datas de última venda e compra
         vendas_data = fetch_max_data_saida(produto_ids)
-        # Fetch last purchase dates
         compras_data = fetch_max_data_compra(produto_ids)
 
-        # Combine the fetched data
+        # Combinar os dados
         produtos_datas = {
             produto_id: {
                 "data_ultima_venda": vendas_data.get(produto_id),
@@ -157,9 +155,9 @@ def process_calculation(politicas: Dict, produtos: Dict, produtos_datas: Dict) -
             data_ultima_venda = ajustar_data_futura(parser.isoparse(data_ultima_venda_str).date())
             data_ultima_compra = ajustar_data_compra(data_ultima_compra_str, data_ultima_venda)
             
-            # Se a data de compra for maior que a de venda, ignore o produto
+            # Se a data de compra for maior ou igual à data de venda, ignore o produto
             if data_ultima_compra >= data_ultima_venda:
-                logger.warning(f"Ignorando produto_id {produto_id} com datas incoerentes: compra posterior à venda")
+                logger.warning(f"Ignorando produto_id {produto_id}: data de compra posterior ou igual à venda.")
                 continue
 
             periodo_venda = max((data_ultima_venda - data_ultima_compra).days, 1)
