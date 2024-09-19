@@ -193,7 +193,7 @@ def process_calculation(politicas: Dict, produtos: Dict, produtos_datas: Dict) -
         # Verificar se o valor total atende ao mínimo da política
         if valor_total_pedido >= (politica.get('valor_minimo') or 0):
             politica_compra = montar_politica_compra(politica, valor_total_pedido, valor_total_pedido_com_desconto, quantidade_produtos, melhor_politica_id, produtos_array)
-            resultado.append(politica_compra)
+            resultado.append(politica_compra)  # Adiciona TODAS as políticas válidas ao resultado
 
     return resultado
 
