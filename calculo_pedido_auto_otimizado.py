@@ -7,7 +7,6 @@ import os
 import logging
 from dateutil import parser
 
-
 router = APIRouter()
 
 # Configurações da API do Supabase
@@ -66,7 +65,7 @@ def fetch_policies(fornecedor_id: int) -> Dict:
     url = f"{API_URL_BASE}/rest/v1/rpc/flowb2b_fetch_politica_compra"
     payload = {"f_id": fornecedor_id}
     response = requests.post(url, headers=HEADERS, json=payload)
-    
+
     if response.status_code != 200:
         logger.error(f"Erro ao buscar políticas: {response.text}")
         raise HTTPException(status_code=response.status_code, detail="Erro ao buscar políticas")
@@ -215,7 +214,7 @@ def fetch_quantidade_vendida(produto_id: int, data_inicio: str, data_fim: str) -
         "data_fim": data_fim
     }
     response = requests.post(url, headers=HEADERS, json=payload)
-    
+
     if response.status_code != 200:
         logger.error(f"Erro ao buscar quantidade vendida: {response.text}")
         raise HTTPException(status_code=response.status_code, detail=f"Erro ao buscar quantidade vendida")
@@ -286,7 +285,7 @@ def find_best_policy(politicas: Dict) -> int:
         desconto = politica.get('desconto') or 0
         prazo_estoque = politica.get('prazo_estoque') or float('inf')
 
-        if desconto > melhor_desconto or (desconto == melhor_desconto e prazo_estoque < menor_prazo):
+        if desconto > melhor_desconto or (desconto == melhor_desconto and prazo_estoque < menor_prazo):
             melhor_desconto = desconto
             menor_prazo = prazo_estoque
             melhor_politica_id = politica.get('id')
