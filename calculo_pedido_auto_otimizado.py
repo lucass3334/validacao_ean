@@ -250,18 +250,18 @@ def calcular_sugestao(produto: Dict, politica: Dict, media_venda_dia: float, qua
     if estoque_atual == 0 and quantidade_vendida > 0:
         sugestao_quantidade = max(sugestao_quantidade, quantidade_vendida)
 
-    # Se o produto tiver mais de uma unidade por caixa, ajusta a sugestão para o múltiplo mais próximo
+    # Ajustar a sugestão de acordo com o número de itens por caixa
     if itens_por_caixa > 1:
-        if sugestao_quantidade <= itens_por_caixa:
-            sugestao_quantidade = itens_por_caixa
-        else:
-            # Arredondar para o múltiplo mais próximo de itens_por_caixa
-            resto = sugestao_quantidade % itens_por_caixa
-            if resto != 0:
-                if resto >= itens_por_caixa / 2:
-                    sugestao_quantidade = sugestao_quantidade - resto + itens_por_caixa  # Arredondar para cima
-                else:
-                    sugestao_quantidade = sugestao_quantidade - resto  # Arredondar para baixo
+        # Arredondar para o múltiplo mais próximo de itens_por_caixa
+        resto = sugestao_quantidade % itens_por_caixa
+        if resto != 0:
+            if resto >= itens_por_caixa / 2:
+                sugestao_quantidade = sugestao_quantidade - resto + itens_por_caixa  # Arredondar para cima
+            else:
+                sugestao_quantidade = sugestao_quantidade - resto  # Arredondar para baixo
+    else:
+        # Quando itens_por_caixa for 1, apenas arredondar para o inteiro mais próximo
+        sugestao_quantidade = round(sugestao_quantidade)
 
     # Multiplicar sugestão caso o estoque seja muito baixo
     multiplicacao = False
@@ -270,6 +270,7 @@ def calcular_sugestao(produto: Dict, politica: Dict, media_venda_dia: float, qua
         multiplicacao = True
 
     return sugestao_quantidade, multiplicacao
+
 
 
 def calcular_valores(produto: Dict, politica: Dict, sugestao_quantidade: float) -> tuple:
