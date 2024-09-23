@@ -238,23 +238,40 @@ def fetch_quantidade_vendida(produto_id: int, data_inicio: str, data_fim: str) -
 
     result = response.json()
     return float(result[0]['quantidade_vendida']) if result else 0
-
 def calcular_sugestao(produto: Dict, politica: Dict, media_venda_dia: float, quantidade_vendida: float) -> tuple:
     itens_por_caixa = produto.get('itens_por_caixa') or 1
     estoque_atual = produto.get('estoque_atual') or 0
     prazo_estoque = politica.get('prazo_estoque') or 0
 
+    # Sugestão de quantidade inicial
     sugestao_quantidade = max(media_venda_dia * prazo_estoque - estoque_atual, 0)
+
     if estoque_atual == 0 and quantidade_vendida > 0:
         sugestao_quantidade = max(sugestao_quantidade, quantidade_vendida)
 
-    sugestao_quantidade = -(-sugestao_quantidade // itens_por_caixa) * itens_por_caixa  # Arredondar para cima
+    # Aplicar a lógica dos múltiplos de itens por caixa
+    if itens_por_caixa > 1:
+        # Arredondar para o múltiplo mais próximo de itens_por_caixa
+        if sugestao_quantidade <= itens_por_caixa:
+            sugestao_quantidade = itens_por_caixa
+        else:
+            resto = sugestao_quantidade % itens_por_caixa
+            if resto == 0:
+                sugestao_quantidade = sugestao_quantidade  # Já é múltiplo
+            else:
+                if resto >= itens_por_caixa / 2:
+                    sugestao_quantidade = sugestao_quantidade - resto + itens_por_caixa  # Arredondar para cima
+                else:
+                    sugestao_quantidade = sugestao_quantidade - resto  # Arredondar para baixo
+
+    # Multiplicar sugestão caso estoque seja muito baixo
     multiplicacao = False
-    if estoque_atual < 2:
+    if estoque_atual < 2 and sugestao_quantidade > 0:
         sugestao_quantidade = -(-sugestao_quantidade * 1.2 // 1)
         multiplicacao = True
 
     return sugestao_quantidade, multiplicacao
+
 
 def calcular_valores(produto: Dict, politica: Dict, sugestao_quantidade: float) -> tuple:
     valor_de_compra = produto.get('valor_de_compra') or 0
