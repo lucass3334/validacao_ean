@@ -242,9 +242,6 @@ def fetch_quantidade_vendida(produto_id: int, data_inicio: str, data_fim: str) -
 def calcular_sugestao(produto: Dict, politica: Dict, media_venda_dia: float, quantidade_vendida: float) -> tuple:
     itens_por_caixa = produto.get('itens_por_caixa') or 1
     estoque_atual = produto.get('estoque_atual') or 0
-    prazo_estoque = politidef calcular_sugestao(produto: Dict, politica: Dict, media_venda_dia: float, quantidade_vendida: float) -> tuple:
-    itens_por_caixa = produto.get('itens_por_caixa') or 1
-    estoque_atual = produto.get('estoque_atual') or 0
     prazo_estoque = politica.get('prazo_estoque') or 0
 
     # Sugestão de quantidade inicial com base na média de vendas diárias e prazo de estoque
@@ -274,6 +271,7 @@ def calcular_sugestao(produto: Dict, politica: Dict, media_venda_dia: float, qua
         multiplicacao = True
 
     return sugestao_quantidade, multiplicacao
+
 
 def calcular_valores(produto: Dict, politica: Dict, sugestao_quantidade: float) -> tuple:
     valor_de_compra = produto.get('valor_de_compra') or 0
