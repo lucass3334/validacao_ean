@@ -242,13 +242,17 @@ def fetch_quantidade_vendida(produto_id: int, data_inicio: str, data_fim: str) -
 def calcular_sugestao(produto: Dict, politica: Dict, media_venda_dia: float, quantidade_vendida: float) -> tuple:
     itens_por_caixa = produto.get('itens_por_caixa') or 1
     estoque_atual = produto.get('estoque_atual') or 0
+    prazo_estoque = politidef calcular_sugestao(produto: Dict, politica: Dict, media_venda_dia: float, quantidade_vendida: float) -> tuple:
+    itens_por_caixa = produto.get('itens_por_caixa') or 1
+    estoque_atual = produto.get('estoque_atual') or 0
     prazo_estoque = politica.get('prazo_estoque') or 0
 
     # Sugestão de quantidade inicial com base na média de vendas diárias e prazo de estoque
-    sugestao_quantidade = max(media_venda_dia * prazo_estoque - estoque_atual, 0)
+    sugestao_quantidade = media_venda_dia * prazo_estoque - estoque_atual
 
-    if estoque_atual == 0 and quantidade_vendida > 0:
-        sugestao_quantidade = max(sugestao_quantidade, quantidade_vendida)
+    # Se o estoque atual for maior ou igual à quantidade necessária, descarta o produto
+    if sugestao_quantidade <= 0:
+        return 0, False  # Retorna 0 para indicar que o produto não será pedido
 
     # Ajustar a sugestão de acordo com o número de itens por caixa
     if itens_por_caixa > 1:
@@ -270,8 +274,6 @@ def calcular_sugestao(produto: Dict, politica: Dict, media_venda_dia: float, qua
         multiplicacao = True
 
     return sugestao_quantidade, multiplicacao
-
-
 
 def calcular_valores(produto: Dict, politica: Dict, sugestao_quantidade: float) -> tuple:
     valor_de_compra = produto.get('valor_de_compra') or 0
