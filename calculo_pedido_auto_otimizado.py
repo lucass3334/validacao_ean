@@ -206,7 +206,7 @@ def process_calculation(politicas: List[Dict], produtos: List[Dict], produtos_da
                 id_produto_bling = fetch_id_produto_bling(produto_id)
                 id_produto_bling_cache[produto_id] = id_produto_bling
 
-            # Adicionar produto ao array de resultado
+            # Adicionar produto ao array de resultado com datas ajustadas
             produtos_array.append(montar_detalhes_produto(
                 produto,
                 quantidade_vendida,
@@ -215,7 +215,9 @@ def process_calculation(politicas: List[Dict], produtos: List[Dict], produtos_da
                 valor_total_produto,
                 valor_total_produto_com_desconto,
                 multiplicacao,
-                id_produto_bling
+                id_produto_bling,
+                data_ultima_venda_str,
+                data_ultima_compra_str
             ))
 
         # Atualizar o somatório de valores por política
@@ -300,7 +302,7 @@ def calcular_valores(produto: Dict, politica: Dict, sugestao_quantidade: float) 
     valor_total_produto_com_desconto = valor_total_produto * (1 - desconto)
     return valor_total_produto, valor_total_produto_com_desconto
 
-def montar_detalhes_produto(produto: Dict, quantidade_vendida: float, periodo_venda: int, sugestao_quantidade: float, valor_total_produto: float, valor_total_produto_com_desconto: float, multiplicacao: bool, id_produto_bling: int) -> Dict:
+def montar_detalhes_produto(produto: Dict, quantidade_vendida: float, periodo_venda: int, sugestao_quantidade: float, valor_total_produto: float, valor_total_produto_com_desconto: float, multiplicacao: bool, id_produto_bling: int, data_ultima_venda_str: str, data_ultima_compra_str: str) -> Dict:
     return {
         'produto_id': produto['produto_id'],
         'codigo_do_produto': produto.get('codigo_produto'),
@@ -310,8 +312,8 @@ def montar_detalhes_produto(produto: Dict, quantidade_vendida: float, periodo_ve
         'valor_total_produto': valor_total_produto,
         'valor_total_produto_com_desconto': valor_total_produto_com_desconto,
         'estoque_atual': produto.get('estoque_atual') or 0,
-        'data_ultima_venda': produto.get('data_ultima_venda'),
-        'data_ultima_compra': produto.get('data_ultima_compra'),
+        'data_ultima_venda': data_ultima_venda_str,
+        'data_ultima_compra': data_ultima_compra_str,
         'itens_por_caixa': produto.get('itens_por_caixa') or 1,
         'multiplicacao_aplicada': multiplicacao,
         'id_produto_bling': id_produto_bling
