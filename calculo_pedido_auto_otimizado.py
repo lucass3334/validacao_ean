@@ -7,7 +7,6 @@ import os
 import logging
 from dateutil import parser
 
-
 router = APIRouter()
 
 # Configurações da API do Supabase
@@ -22,7 +21,7 @@ HEADERS = {
 }
 
 # Configurar o logger
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.WARNING)  # Ajustado para WARNING para reduzir verbosidade
 logger = logging.getLogger(__name__)
 
 class FornecedorID(BaseModel):
@@ -127,7 +126,6 @@ def fetch_max_data_compra(produto_ids: list) -> Dict:
     compras_data = response.json()
     return {item['produto_id']: item['max_data_compra'] for item in compras_data}
 
-# Função adicional para buscar id_produto_bling para cada produto
 def fetch_id_produto_bling(produto_id: int) -> int:
     url = f"{API_URL_BASE}/rest/v1/produtos?id=eq.{produto_id}"
     response = requests.get(url, headers=HEADERS)
@@ -146,6 +144,9 @@ def process_calculation(politicas: List[Dict], produtos: List[Dict], produtos_da
     # Variável acumuladora de valores dos produtos
     soma_valor_produtos_por_politica = {politica['id']: 0 for politica in politicas}
 
+    # Cache para id_produto_bling
+    id_produto_bling_cache = {}
+
     for politica in politicas:
         produtos_array = []
         valor_total_pedido = 0
@@ -159,16 +160,12 @@ def process_calculation(politicas: List[Dict], produtos: List[Dict], produtos_da
             data_ultima_venda_str = data_info.get('data_ultima_venda')
             data_ultima_compra_str = data_info.get('data_ultima_compra')
 
-            # Descartar o produto o quanto antes se a data de compra for posterior à de venda
-            if data_ultima_compra_str and data_ultima_venda_str:
-                data_ultima_venda = parser.isoparse(data_ultima_venda_str).date()
-                data_ultima_compra = parser.isoparse(data_ultima_compra_str).date()
+            estoque_atual = produto.get('estoque_atual') or 0
 
-                if data_ultima_compra >= data_ultima_venda:
-                    logger.warning(f"Ignorando produto_id {produto_id}: data de compra posterior ou igual à venda.")
-                    continue  # Ignorar produtos com datas inválidas
-
-            if not data_ultima_venda_str:
+            # Aplicar a nova regra de negócio
+            if estoque_atual > 0:
+                data_ultima_venda_str = datetime.now().date().isoformat()
+            elif not data_ultima_venda_str:
                 continue  # Ignorar produtos sem última venda
 
             # Calcular período de venda
@@ -178,7 +175,11 @@ def process_calculation(politicas: List[Dict], produtos: List[Dict], produtos_da
             periodo_venda = max((data_ultima_venda - data_ultima_compra).days, 1)
 
             # Buscar a quantidade vendida
-            quantidade_vendida = fetch_quantidade_vendida(produto_id, data_ultima_compra.isoformat(), data_ultima_venda.isoformat())
+            quantidade_vendida = fetch_quantidade_vendida(
+                produto_id,
+                data_ultima_compra.isoformat(),
+                data_ultima_venda.isoformat()
+            )
 
             # Calcular média de vendas diárias
             media_venda_dia = quantidade_vendida / periodo_venda
@@ -198,18 +199,38 @@ def process_calculation(politicas: List[Dict], produtos: List[Dict], produtos_da
             valor_total_pedido_com_desconto += valor_total_produto_com_desconto
             quantidade_produtos += 1
 
-            # Buscar id_produto_bling
-            id_produto_bling = fetch_id_produto_bling(produto_id)
+            # Buscar id_produto_bling com cache
+            if produto_id in id_produto_bling_cache:
+                id_produto_bling = id_produto_bling_cache[produto_id]
+            else:
+                id_produto_bling = fetch_id_produto_bling(produto_id)
+                id_produto_bling_cache[produto_id] = id_produto_bling
 
             # Adicionar produto ao array de resultado
-            produtos_array.append(montar_detalhes_produto(produto, quantidade_vendida, periodo_venda, sugestao_quantidade, valor_total_produto, valor_total_produto_com_desconto, multiplicacao, id_produto_bling))
+            produtos_array.append(montar_detalhes_produto(
+                produto,
+                quantidade_vendida,
+                periodo_venda,
+                sugestao_quantidade,
+                valor_total_produto,
+                valor_total_produto_com_desconto,
+                multiplicacao,
+                id_produto_bling
+            ))
 
         # Atualizar o somatório de valores por política
         soma_valor_produtos_por_politica[politica['id']] += valor_total_pedido
 
         # Adicionar política apenas se o valor total do pedido for maior que o mínimo
         if valor_total_pedido >= (politica.get('valor_minimo') or 0):
-            politica_compra = montar_politica_compra(politica, valor_total_pedido, valor_total_pedido_com_desconto, quantidade_produtos, politica['id'] == melhor_politica_id, produtos_array)
+            politica_compra = montar_politica_compra(
+                politica,
+                valor_total_pedido,
+                valor_total_pedido_com_desconto,
+                quantidade_produtos,
+                politica['id'] == melhor_politica_id,
+                produtos_array
+            )
             resultado.append(politica_compra)
 
     return resultado
@@ -219,7 +240,7 @@ def ajustar_data_futura(data: datetime) -> datetime:
 
 def ajustar_data_compra(data_ultima_compra_str: str, data_ultima_venda: datetime) -> datetime:
     if not data_ultima_compra_str:
-        return datetime.now().date() - timedelta(days=365)  # Data de compra nula: 1 ano atrás
+        return data_ultima_venda - timedelta(days=365)  # Data de compra nula: 1 ano antes da última venda
     data_ultima_compra = parser.isoparse(data_ultima_compra_str).date()
     return min(data_ultima_compra, data_ultima_venda - timedelta(days=1))
 
@@ -238,7 +259,7 @@ def fetch_quantidade_vendida(produto_id: int, data_inicio: str, data_fim: str) -
 
     result = response.json()
     return float(result[0]['quantidade_vendida']) if result else 0
-    
+
 def calcular_sugestao(produto: Dict, politica: Dict, media_venda_dia: float, quantidade_vendida: float) -> tuple:
     itens_por_caixa = produto.get('itens_por_caixa') or 1
     estoque_atual = produto.get('estoque_atual') or 0
@@ -272,7 +293,6 @@ def calcular_sugestao(produto: Dict, politica: Dict, media_venda_dia: float, qua
 
     return sugestao_quantidade, multiplicacao
 
-
 def calcular_valores(produto: Dict, politica: Dict, sugestao_quantidade: float) -> tuple:
     valor_de_compra = produto.get('valor_de_compra') or 0
     valor_total_produto = sugestao_quantidade * valor_de_compra
@@ -294,7 +314,7 @@ def montar_detalhes_produto(produto: Dict, quantidade_vendida: float, periodo_ve
         'data_ultima_compra': produto.get('data_ultima_compra'),
         'itens_por_caixa': produto.get('itens_por_caixa') or 1,
         'multiplicacao_aplicada': multiplicacao,
-        'id_produto_bling': id_produto_bling  # Adicionando a chave id_produto_bling
+        'id_produto_bling': id_produto_bling
     }
 
 def montar_politica_compra(politica: Dict, valor_total_pedido: float, valor_total_pedido_com_desconto: float, quantidade_produtos: int, melhor_politica: bool, produtos_array: list) -> Dict:
