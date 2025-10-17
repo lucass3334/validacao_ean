@@ -300,12 +300,9 @@ def fetch_max_data_compra_with_monitoring(produto_ids: list, rules: CalculationR
         rules.add_error(f"Exceção ao buscar datas de compra: {str(e)}")
         raise
 
-def process_calculation_with_monitoring(politicas: List[Dict], produtos: List[Dict], 
+def process_calculation_with_monitoring(politicas: List[Dict], produtos: List[Dict],
                                       produtos_datas: Dict, rules: CalculationRules) -> list:
     resultado = []
-    melhor_politica_id = find_best_policy_with_monitoring(politicas, rules)
-    
-    rules.add_rule("BEST_POLICY_SELECTED", f"Melhor política selecionada: {melhor_politica_id}")
 
     # Cache para id_produto_bling
     id_produto_bling_cache = {}
@@ -360,7 +357,7 @@ def process_calculation_with_monitoring(politicas: List[Dict], produtos: List[Di
                 valor_total_pedido,
                 valor_total_pedido_com_desconto,
                 quantidade_produtos,
-                politica['id'] == melhor_politica_id,
+                False,  # melhor_politica será definido depois
                 produtos_array
             )
             resultado.append(politica_compra)
@@ -370,6 +367,13 @@ def process_calculation_with_monitoring(politicas: List[Dict], produtos: List[Di
                 "valor_total": valor_total_pedido,
                 "valor_minimo": valor_minimo
             })
+
+    # Determinar melhor política entre as que atingiram valor mínimo
+    if resultado:
+        melhor_politica_id = find_best_policy_among_results(resultado, rules)
+        for politica_compra in resultado:
+            if politica_compra['politica_id'] == melhor_politica_id:
+                politica_compra['melhor_politica'] = True
 
     return resultado
 
@@ -392,8 +396,21 @@ def process_product_with_monitoring(produto: Dict, politica: Dict, produtos_data
 
         # REGRA 1: Aplicar regra de estoque com produto disponível
         if estoque_atual > 0:
+            if data_ultima_venda_str:
+                dias_sem_vender = (datetime.now().date() - parser.isoparse(data_ultima_venda_str).date()).days
+
+                # Produto parado há mais de 90 dias - descartar
+                if dias_sem_vender > 90:
+                    rules.add_rule("STALLED_PRODUCT", "Produto parado há mais de 90 dias - descartado",
+                                  produto_id, data={
+                                      "dias_sem_vender": dias_sem_vender,
+                                      "estoque_atual": estoque_atual,
+                                      "data_ultima_venda": data_ultima_venda_str
+                                  })
+                    return None
+
             data_ultima_venda_str = datetime.now().date().isoformat()
-            rules.add_rule("STOCK_AVAILABLE_RULE", "Produto com estoque - data de venda ajustada para hoje", 
+            rules.add_rule("STOCK_AVAILABLE_RULE", "Produto com estoque - data de venda ajustada para hoje",
                           produto_id, data={"nova_data_venda": data_ultima_venda_str})
         elif not data_ultima_venda_str:
             rules.add_rule("NO_SALES_HISTORY_RULE", "Produto sem histórico de vendas e sem estoque - descartado", produto_id)
@@ -404,7 +421,7 @@ def process_product_with_monitoring(produto: Dict, politica: Dict, produtos_data
             parser.isoparse(data_ultima_venda_str).date(), rules, produto_id
         )
         data_ultima_compra = ajustar_data_compra_with_monitoring(
-            data_ultima_compra_str, data_ultima_venda, rules, produto_id
+            data_ultima_compra_str, data_ultima_venda, politica, rules, produto_id
         )
 
         # Calcular período de venda
@@ -490,11 +507,29 @@ def calcular_sugestao_with_monitoring(produto: Dict, politica: Dict, media_venda
 
     # Fórmula base
     sugestao_inicial = media_venda_dia * prazo_estoque - estoque_atual
+
+    # Margem de segurança para risco de ruptura
+    dias_cobertura = estoque_atual / max(media_venda_dia, 0.01)
+    aplicou_margem_seguranca = False
+
+    if dias_cobertura < 3 or (estoque_atual < 2 and media_venda_dia > 0.5):
+        margem_seguranca = 1.25  # 25% a mais
+        sugestao_inicial = sugestao_inicial * margem_seguranca
+        aplicou_margem_seguranca = True
+
+        rules.add_rule("SAFETY_MARGIN_APPLIED", "Margem de segurança aplicada - risco de ruptura",
+                      produto_id, data={
+                          "dias_cobertura": round(dias_cobertura, 2),
+                          "margem_percentual": "25%",
+                          "motivo": "dias_cobertura < 3" if dias_cobertura < 3 else "estoque < 2 e alta rotação"
+                      })
+
     rules.add_rule("INITIAL_SUGGESTION", "Sugestão inicial calculada", produto_id, data={
         "media_venda_dia": media_venda_dia,
         "prazo_estoque": prazo_estoque,
         "estoque_atual": estoque_atual,
-        "sugestao_inicial": sugestao_inicial
+        "sugestao_inicial": sugestao_inicial,
+        "margem_seguranca_aplicada": aplicou_margem_seguranca
     })
 
     if sugestao_inicial <= 0:
@@ -513,6 +548,13 @@ def calcular_sugestao_with_monitoring(produto: Dict, politica: Dict, media_venda
                 })
             else:
                 sugestao_quantidade = sugestao_inicial - resto
+                # Garantir pelo menos 1 caixa se há demanda
+                if sugestao_quantidade == 0 and media_venda_dia > 0:
+                    sugestao_quantidade = itens_por_caixa
+                    rules.add_rule("PACKAGE_MINIMUM_ENFORCED", "Quantidade mínima garantida - produto com demanda", produto_id, data={
+                        "media_venda_dia": media_venda_dia,
+                        "itens_por_caixa": itens_por_caixa
+                    })
                 rules.add_rule("PACKAGE_ROUND_DOWN", "Arredondado para baixo por embalagem", produto_id, data={
                     "resto": resto,
                     "itens_por_caixa": itens_por_caixa,
@@ -527,13 +569,15 @@ def calcular_sugestao_with_monitoring(produto: Dict, politica: Dict, media_venda
             "sugestao_final": sugestao_quantidade
         })
 
-    # Regra de multiplicação por estoque crítico
+    # Regra de multiplicação por estoque crítico (baseado em dias de cobertura)
     multiplicacao = False
-    if estoque_atual < 2 and sugestao_quantidade > 0:
+    dias_cobertura_estoque = estoque_atual / max(media_venda_dia, 0.01)
+    if dias_cobertura_estoque < 3 and sugestao_quantidade > 0:
         sugestao_quantidade = max(sugestao_quantidade, itens_por_caixa)
         multiplicacao = True
-        rules.add_rule("CRITICAL_STOCK_RULE", "Regra de estoque crítico aplicada", produto_id, data={
+        rules.add_rule("CRITICAL_STOCK_RULE", "Regra de estoque crítico aplicada - cobertura < 3 dias", produto_id, data={
             "estoque_atual": estoque_atual,
+            "dias_cobertura": round(dias_cobertura_estoque, 2),
             "quantidade_garantida": sugestao_quantidade
         })
 
@@ -566,29 +610,33 @@ def ajustar_data_futura_with_monitoring(data: datetime, rules: CalculationRules,
         return data_hoje
     return data
 
-def ajustar_data_compra_with_monitoring(data_ultima_compra_str: str, data_ultima_venda: datetime, 
-                                      rules: CalculationRules, produto_id: int) -> datetime:
+def ajustar_data_compra_with_monitoring(data_ultima_compra_str: str, data_ultima_venda: datetime,
+                                      politica: Dict, rules: CalculationRules, produto_id: int) -> datetime:
+    prazo_estoque = politica.get('prazo_estoque') or 30
+
     if not data_ultima_compra_str:
-        data_ajustada = data_ultima_venda - timedelta(days=365)
-        rules.add_rule("NULL_PURCHASE_DATE", "Data de compra nula - assumindo 1 ano antes da venda", 
+        data_ajustada = data_ultima_venda - timedelta(days=prazo_estoque)
+        rules.add_rule("NULL_PURCHASE_DATE", "Data de compra nula - usando prazo da política",
                       produto_id, data={
                           "data_venda": data_ultima_venda.isoformat(),
+                          "prazo_usado": prazo_estoque,
                           "data_compra_assumida": data_ajustada.isoformat()
                       })
         return data_ajustada
-    
+
     data_ultima_compra = parser.isoparse(data_ultima_compra_str).date()
-    data_minima = data_ultima_venda - timedelta(days=1)
-    
+
     if data_ultima_compra >= data_ultima_venda:
-        rules.add_rule("PURCHASE_DATE_ADJUSTED", "Data de compra ajustada para 1 dia antes da venda", 
+        data_ajustada = data_ultima_venda - timedelta(days=prazo_estoque)
+        rules.add_rule("PURCHASE_DATE_ADJUSTED", "Data de compra ajustada usando prazo da política",
                       produto_id, data={
                           "data_compra_original": data_ultima_compra.isoformat(),
-                          "data_compra_ajustada": data_minima.isoformat(),
+                          "prazo_usado": prazo_estoque,
+                          "data_compra_ajustada": data_ajustada.isoformat(),
                           "data_venda": data_ultima_venda.isoformat()
                       })
-        return data_minima
-    
+        return data_ajustada
+
     return data_ultima_compra
 
 def fetch_quantidade_vendida_with_monitoring(produto_id: int, data_inicio: str, data_fim: str, 
@@ -620,6 +668,34 @@ def fetch_quantidade_vendida_with_monitoring(produto_id: int, data_inicio: str, 
     except Exception as e:
         rules.add_error(f"Exceção ao buscar quantidade vendida: {str(e)}", produto_id)
         raise
+
+def find_best_policy_among_results(resultado: List[Dict], rules: CalculationRules) -> Optional[int]:
+    """Encontra a melhor política entre as que foram incluídas no resultado (atingiram valor mínimo)"""
+    if not resultado:
+        return None
+
+    melhor_desconto = 0
+    menor_prazo = float('inf')
+    melhor_politica_id = None
+
+    rules.add_rule("BEST_POLICY_SELECTION", f"Selecionando melhor entre {len(resultado)} políticas que atingiram valor mínimo")
+
+    for item in resultado:
+        desconto = item.get('desconto', 0)
+        prazo_estoque = item.get('prazo_estoque', float('inf'))
+        politica_id = item.get('politica_id')
+
+        if desconto > melhor_desconto or (desconto == melhor_desconto and prazo_estoque < menor_prazo):
+            melhor_desconto = desconto
+            menor_prazo = prazo_estoque
+            melhor_politica_id = politica_id
+
+    rules.add_rule("BEST_POLICY_DETERMINED", f"Melhor política determinada: {melhor_politica_id}", data={
+        "melhor_desconto": melhor_desconto,
+        "menor_prazo": menor_prazo
+    })
+
+    return melhor_politica_id
 
 def find_best_policy_with_monitoring(politicas: List[Dict], rules: CalculationRules) -> int:
     melhor_desconto = 0
@@ -736,7 +812,6 @@ def fetch_id_produto_bling(produto_id: int) -> int:
 
 def process_calculation(politicas: List[Dict], produtos: List[Dict], produtos_datas: Dict) -> list:
     resultado = []
-    melhor_politica_id = find_best_policy(politicas)
 
     id_produto_bling_cache = {}
 
@@ -756,12 +831,19 @@ def process_calculation(politicas: List[Dict], produtos: List[Dict], produtos_da
             estoque_atual = produto.get('estoque_atual') or 0
 
             if estoque_atual > 0:
+                if data_ultima_venda_str:
+                    dias_sem_vender = (datetime.now().date() - parser.isoparse(data_ultima_venda_str).date()).days
+
+                    # Produto parado há mais de 90 dias - descartar
+                    if dias_sem_vender > 90:
+                        continue
+
                 data_ultima_venda_str = datetime.now().date().isoformat()
             elif not data_ultima_venda_str:
                 continue
 
             data_ultima_venda = ajustar_data_futura(parser.isoparse(data_ultima_venda_str).date())
-            data_ultima_compra = ajustar_data_compra(data_ultima_compra_str, data_ultima_venda)
+            data_ultima_compra = ajustar_data_compra(data_ultima_compra_str, data_ultima_venda, politica)
 
             periodo_venda = max((data_ultima_venda - data_ultima_compra).days, 1)
 
@@ -809,21 +891,35 @@ def process_calculation(politicas: List[Dict], produtos: List[Dict], produtos_da
                 valor_total_pedido,
                 valor_total_pedido_com_desconto,
                 quantidade_produtos,
-                politica['id'] == melhor_politica_id,
+                False,  # melhor_politica será definido depois
                 produtos_array
             )
             resultado.append(politica_compra)
+
+    # Determinar melhor política entre as que atingiram valor mínimo
+    if resultado:
+        melhor_politica_id = find_best_policy_among_results_simple(resultado)
+        for politica_compra in resultado:
+            if politica_compra['politica_id'] == melhor_politica_id:
+                politica_compra['melhor_politica'] = True
 
     return resultado
 
 def ajustar_data_futura(data: datetime) -> datetime:
     return min(data, datetime.now().date())
 
-def ajustar_data_compra(data_ultima_compra_str: str, data_ultima_venda: datetime) -> datetime:
+def ajustar_data_compra(data_ultima_compra_str: str, data_ultima_venda: datetime, politica: Dict) -> datetime:
+    prazo_estoque = politica.get('prazo_estoque') or 30
+
     if not data_ultima_compra_str:
-        return data_ultima_venda - timedelta(days=365)
+        return data_ultima_venda - timedelta(days=prazo_estoque)
+
     data_ultima_compra = parser.isoparse(data_ultima_compra_str).date()
-    return min(data_ultima_compra, data_ultima_venda - timedelta(days=1))
+
+    if data_ultima_compra >= data_ultima_venda:
+        return data_ultima_venda - timedelta(days=prazo_estoque)
+
+    return data_ultima_compra
 
 def fetch_quantidade_vendida(produto_id: int, data_inicio: str, data_fim: str) -> float:
     url = f"{API_URL_BASE}/rest/v1/rpc/get_quantidade_vendida"
@@ -848,6 +944,12 @@ def calcular_sugestao(produto: Dict, politica: Dict, media_venda_dia: float, qua
 
     sugestao_quantidade = media_venda_dia * prazo_estoque - estoque_atual
 
+    # Margem de segurança para risco de ruptura
+    dias_cobertura = estoque_atual / max(media_venda_dia, 0.01)
+    if dias_cobertura < 3 or (estoque_atual < 2 and media_venda_dia > 0.5):
+        margem_seguranca = 1.25  # 25% a mais
+        sugestao_quantidade = sugestao_quantidade * margem_seguranca
+
     if sugestao_quantidade <= 0:
         return 0, False
 
@@ -858,11 +960,16 @@ def calcular_sugestao(produto: Dict, politica: Dict, media_venda_dia: float, qua
                 sugestao_quantidade = sugestao_quantidade - resto + itens_por_caixa
             else:
                 sugestao_quantidade = sugestao_quantidade - resto
+                # Garantir pelo menos 1 caixa se há demanda
+                if sugestao_quantidade == 0 and media_venda_dia > 0:
+                    sugestao_quantidade = itens_por_caixa
     else:
         sugestao_quantidade = round(sugestao_quantidade)
 
+    # Regra de multiplicação por estoque crítico (baseado em dias de cobertura)
     multiplicacao = False
-    if estoque_atual < 2 and sugestao_quantidade > 0:
+    dias_cobertura_estoque = estoque_atual / max(media_venda_dia, 0.01)
+    if dias_cobertura_estoque < 3 and sugestao_quantidade > 0:
         sugestao_quantidade = max(sugestao_quantidade, itens_por_caixa)
         multiplicacao = True
 
@@ -911,6 +1018,26 @@ def montar_politica_compra(politica: Dict, valor_total_pedido: float,
         'valor_total_pedido_com_desconto': valor_total_pedido_com_desconto,
         'produtos': produtos_array
     }
+
+def find_best_policy_among_results_simple(resultado: List[Dict]) -> Optional[int]:
+    """Versão simples: encontra melhor política entre as incluídas no resultado"""
+    if not resultado:
+        return None
+
+    melhor_desconto = 0
+    menor_prazo = float('inf')
+    melhor_politica_id = None
+
+    for item in resultado:
+        desconto = item.get('desconto', 0)
+        prazo_estoque = item.get('prazo_estoque', float('inf'))
+
+        if desconto > melhor_desconto or (desconto == melhor_desconto and prazo_estoque < menor_prazo):
+            melhor_desconto = desconto
+            menor_prazo = prazo_estoque
+            melhor_politica_id = item['politica_id']
+
+    return melhor_politica_id
 
 def find_best_policy(politicas: List[Dict]) -> int:
     melhor_desconto = 0
