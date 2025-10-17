@@ -539,12 +539,12 @@ def calcular_sugestao_with_monitoring(produto: Dict, politica: Dict, media_venda
 
     return sugestao_quantidade, multiplicacao
 
-def calcular_valores_with_monitoring(produto: Dict, politica: Dict, sugestao_quantidade: float, 
+def calcular_valores_with_monitoring(produto: Dict, politica: Dict, sugestao_quantidade: float,
                                    rules: CalculationRules, produto_id: int) -> tuple:
     valor_de_compra = produto.get('valor_de_compra') or 0
     valor_total_produto = sugestao_quantidade * valor_de_compra
     desconto = politica.get('desconto') or 0
-    valor_total_produto_com_desconto = valor_total_produto * (1 - desconto)
+    valor_total_produto_com_desconto = valor_total_produto * (1 - desconto / 100)
     
     rules.add_rule("VALUES_CALCULATED", "Valores calculados", produto_id, data={
         "valor_unitario": valor_de_compra,
@@ -872,7 +872,7 @@ def calcular_valores(produto: Dict, politica: Dict, sugestao_quantidade: float) 
     valor_de_compra = produto.get('valor_de_compra') or 0
     valor_total_produto = sugestao_quantidade * valor_de_compra
     desconto = politica.get('desconto') or 0
-    valor_total_produto_com_desconto = valor_total_produto * (1 - desconto)
+    valor_total_produto_com_desconto = valor_total_produto * (1 - desconto / 100)
     return valor_total_produto, valor_total_produto_com_desconto
 
 def montar_detalhes_produto(produto: Dict, quantidade_vendida: float, periodo_venda: int, 
