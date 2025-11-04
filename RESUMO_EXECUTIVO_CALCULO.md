@@ -42,12 +42,11 @@ QUANTIDADE = [(Média diária × Prazo da política) - Estoque atual] × Margem 
 
 ---
 
-## 🛡️ PROTEÇÕES AUTOMÁTICAS (NOVO!)
+## 🛡️ PROTEÇÕES AUTOMÁTICAS
 
 ### **1. Margem de Segurança +25%**
-**Quando:** Produto em risco de ruptura
-- Estoque cobre menos de 3 dias
-- OU estoque < 2 unidades com alta rotação
+**Quando:** Estoque = 0 (zerado)
+- Produto completamente sem estoque
 
 **Exemplo:**
 - Precisa: 300 unidades
@@ -56,24 +55,17 @@ QUANTIDADE = [(Média diária × Prazo da política) - Estoque atual] × Margem 
 
 ---
 
-### **2. Proteção de Estoque Crítico**
-**Quando:** Cobertura < 3 dias
-- Garante no mínimo 1 caixa completa
-- Evita ficar sem estoque de produtos de alta rotação
+### **2. Arredondamento SEMPRE PARA CIMA**
+**Quando:** Produto vendido em caixa
+- 1.4 caixas → 2 caixas
+- Nunca arredonda para baixo
 
 ---
 
-### **3. Proteção de Arredondamento**
-**Quando:** Arredondamento zeraria produto com demanda
-- Força compra de pelo menos 1 caixa
-- Evita perder vendas
-
----
-
-### **4. Descarte de Estoque Morto**
-**Quando:** Produto parado > 90 dias
-- Não compra mais
-- Libera capital de giro
+### **3. Proteção de 1 Caixa Mínima**
+**Quando:** Produto em caixa com sugestão > 0
+- Unidade ≠ UN, UNT
+- Garante pelo menos 1 caixa completa
 
 ---
 
@@ -111,15 +103,14 @@ QUANTIDADE = [(Média diária × Prazo da política) - Estoque atual] × Margem 
 
 ---
 
-## 🚨 PRINCIPAIS MUDANÇAS (v2.0)
+## 🚨 PRINCIPAIS MUDANÇAS (v3.0)
 
-| Antes | Agora | Benefício |
-|-------|-------|-----------|
-| Sem margem de segurança | +25% em risco de ruptura | Menos rupturas |
-| Estoque crítico fixo (< 2 un) | Dinâmico (< 3 dias) | Mais inteligente |
-| Ajuste de 1 dia | Ajuste pelo prazo da política | Médias realistas |
-| Comprava produto parado | Descarta se > 90 dias | Libera capital |
-| Melhor política antes | Melhor após calcular | Mais honesto |
+| Aspecto | v2.0 | v3.0 (Atual) | Benefício |
+|---------|------|--------------|-----------|
+| **Margem 25%** | Dias cobertura < 3 | Apenas estoque = 0 | Alinhado com planilha |
+| **Arredondamento** | Baseado em metade | SEMPRE PARA CIMA | Nunca falta produto |
+| **Proteção 1 caixa** | Dias cobertura < 3 | Baseado em unidade (CX, PCT) | Mais preciso |
+| **Produtos parados** | Descarta > 90 dias | Não descarta | Mantém sazonais |
 
 ---
 
@@ -128,11 +119,12 @@ QUANTIDADE = [(Média diária × Prazo da política) - Estoque atual] × Margem 
 **Para validar um pedido gerado:**
 
 ✅ Produtos sem demanda foram descartados?
-✅ Produtos parados foram descartados?
-✅ Produtos em risco receberam +25%?
+✅ Produtos com estoque = 0 receberam +25%?
+✅ Arredondamento foi sempre para CIMA?
+✅ Produtos em caixa têm pelo menos 1 caixa?
 ✅ Descontos aplicados corretamente?
 ✅ "Melhor política" é atingível?
-✅ Valores batem com seus cálculos manuais?
+✅ Valores batem com a planilha manual?
 
 ---
 

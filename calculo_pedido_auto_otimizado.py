@@ -396,19 +396,6 @@ def process_product_with_monitoring(produto: Dict, politica: Dict, produtos_data
 
         # REGRA 1: Aplicar regra de estoque com produto disponível
         if estoque_atual > 0:
-            if data_ultima_venda_str:
-                dias_sem_vender = (datetime.now().date() - parser.isoparse(data_ultima_venda_str).date()).days
-
-                # Produto parado há mais de 90 dias - descartar
-                if dias_sem_vender > 90:
-                    rules.add_rule("STALLED_PRODUCT", "Produto parado há mais de 90 dias - descartado",
-                                  produto_id, data={
-                                      "dias_sem_vender": dias_sem_vender,
-                                      "estoque_atual": estoque_atual,
-                                      "data_ultima_venda": data_ultima_venda_str
-                                  })
-                    return None
-
             data_ultima_venda_str = datetime.now().date().isoformat()
             rules.add_rule("STOCK_AVAILABLE_RULE", "Produto com estoque - data de venda ajustada para hoje",
                           produto_id, data={"nova_data_venda": data_ultima_venda_str})
@@ -508,20 +495,18 @@ def calcular_sugestao_with_monitoring(produto: Dict, politica: Dict, media_venda
     # Fórmula base
     sugestao_inicial = media_venda_dia * prazo_estoque - estoque_atual
 
-    # Margem de segurança para risco de ruptura
-    dias_cobertura = estoque_atual / max(media_venda_dia, 0.01)
+    # Margem de segurança - aplicar APENAS quando estoque zerado
     aplicou_margem_seguranca = False
 
-    if dias_cobertura < 3 or (estoque_atual < 2 and media_venda_dia > 0.5):
+    if estoque_atual == 0:
         margem_seguranca = 1.25  # 25% a mais
         sugestao_inicial = sugestao_inicial * margem_seguranca
         aplicou_margem_seguranca = True
 
-        rules.add_rule("SAFETY_MARGIN_APPLIED", "Margem de segurança aplicada - risco de ruptura",
+        rules.add_rule("SAFETY_MARGIN_APPLIED", "Margem de segurança aplicada - estoque zerado",
                       produto_id, data={
-                          "dias_cobertura": round(dias_cobertura, 2),
-                          "margem_percentual": "25%",
-                          "motivo": "dias_cobertura < 3" if dias_cobertura < 3 else "estoque < 2 e alta rotação"
+                          "estoque_atual": estoque_atual,
+                          "margem_percentual": "25%"
                       })
 
     rules.add_rule("INITIAL_SUGGESTION", "Sugestão inicial calculada", produto_id, data={
@@ -535,31 +520,20 @@ def calcular_sugestao_with_monitoring(produto: Dict, politica: Dict, media_venda
     if sugestao_inicial <= 0:
         return 0, False
 
-    # Ajustar por embalagem
+    # Ajustar por embalagem - SEMPRE ARREDONDAR PARA CIMA
     if itens_por_caixa > 1:
         resto = sugestao_inicial % itens_por_caixa
         if resto != 0:
-            if resto >= itens_por_caixa / 2:
-                sugestao_quantidade = sugestao_inicial - resto + itens_por_caixa
-                rules.add_rule("PACKAGE_ROUND_UP", "Arredondado para cima por embalagem", produto_id, data={
-                    "resto": resto,
-                    "itens_por_caixa": itens_por_caixa,
-                    "sugestao_final": sugestao_quantidade
-                })
-            else:
-                sugestao_quantidade = sugestao_inicial - resto
-                # Garantir pelo menos 1 caixa se há demanda
-                if sugestao_quantidade == 0 and media_venda_dia > 0:
-                    sugestao_quantidade = itens_por_caixa
-                    rules.add_rule("PACKAGE_MINIMUM_ENFORCED", "Quantidade mínima garantida - produto com demanda", produto_id, data={
-                        "media_venda_dia": media_venda_dia,
-                        "itens_por_caixa": itens_por_caixa
-                    })
-                rules.add_rule("PACKAGE_ROUND_DOWN", "Arredondado para baixo por embalagem", produto_id, data={
-                    "resto": resto,
-                    "itens_por_caixa": itens_por_caixa,
-                    "sugestao_final": sugestao_quantidade
-                })
+            # Sempre arredonda para CIMA (ex: 1.4 caixas → 2 caixas)
+            sugestao_quantidade = sugestao_inicial - resto + itens_por_caixa
+            rules.add_rule("PACKAGE_ROUND_UP", "Arredondado para CIMA por embalagem", produto_id, data={
+                "sugestao_inicial": sugestao_inicial,
+                "resto": resto,
+                "itens_por_caixa": itens_por_caixa,
+                "caixas_antes": round(sugestao_inicial / itens_por_caixa, 2),
+                "caixas_depois": int(sugestao_quantidade / itens_por_caixa),
+                "sugestao_final": sugestao_quantidade
+            })
         else:
             sugestao_quantidade = sugestao_inicial
     else:
@@ -569,17 +543,20 @@ def calcular_sugestao_with_monitoring(produto: Dict, politica: Dict, media_venda
             "sugestao_final": sugestao_quantidade
         })
 
-    # Regra de multiplicação por estoque crítico (baseado em dias de cobertura)
+    # Garantir pelo menos 1 caixa se produto é vendido em caixa e tem sugestão > 0
     multiplicacao = False
-    dias_cobertura_estoque = estoque_atual / max(media_venda_dia, 0.01)
-    if dias_cobertura_estoque < 3 and sugestao_quantidade > 0:
+    unidade_produto = produto.get('unidade', 'UN').upper()
+    eh_produto_caixa = unidade_produto not in ['UN', 'UNT']
+
+    if eh_produto_caixa and sugestao_quantidade > 0:
         sugestao_quantidade = max(sugestao_quantidade, itens_por_caixa)
         multiplicacao = True
-        rules.add_rule("CRITICAL_STOCK_RULE", "Regra de estoque crítico aplicada - cobertura < 3 dias", produto_id, data={
-            "estoque_atual": estoque_atual,
-            "dias_cobertura": round(dias_cobertura_estoque, 2),
-            "quantidade_garantida": sugestao_quantidade
-        })
+        rules.add_rule("BOX_MINIMUM_ENFORCED", "Garantida 1 caixa mínima - produto vendido em caixa",
+                      produto_id, data={
+                          "unidade": unidade_produto,
+                          "itens_por_caixa": itens_por_caixa,
+                          "quantidade_garantida": sugestao_quantidade
+                      })
 
     return sugestao_quantidade, multiplicacao
 
@@ -831,13 +808,6 @@ def process_calculation(politicas: List[Dict], produtos: List[Dict], produtos_da
             estoque_atual = produto.get('estoque_atual') or 0
 
             if estoque_atual > 0:
-                if data_ultima_venda_str:
-                    dias_sem_vender = (datetime.now().date() - parser.isoparse(data_ultima_venda_str).date()).days
-
-                    # Produto parado há mais de 90 dias - descartar
-                    if dias_sem_vender > 90:
-                        continue
-
                 data_ultima_venda_str = datetime.now().date().isoformat()
             elif not data_ultima_venda_str:
                 continue
@@ -944,32 +914,29 @@ def calcular_sugestao(produto: Dict, politica: Dict, media_venda_dia: float, qua
 
     sugestao_quantidade = media_venda_dia * prazo_estoque - estoque_atual
 
-    # Margem de segurança para risco de ruptura
-    dias_cobertura = estoque_atual / max(media_venda_dia, 0.01)
-    if dias_cobertura < 3 or (estoque_atual < 2 and media_venda_dia > 0.5):
+    # Margem de segurança - aplicar APENAS quando estoque zerado
+    if estoque_atual == 0:
         margem_seguranca = 1.25  # 25% a mais
         sugestao_quantidade = sugestao_quantidade * margem_seguranca
 
     if sugestao_quantidade <= 0:
         return 0, False
 
+    # Ajustar por embalagem - SEMPRE ARREDONDAR PARA CIMA
     if itens_por_caixa > 1:
         resto = sugestao_quantidade % itens_por_caixa
         if resto != 0:
-            if resto >= itens_por_caixa / 2:
-                sugestao_quantidade = sugestao_quantidade - resto + itens_por_caixa
-            else:
-                sugestao_quantidade = sugestao_quantidade - resto
-                # Garantir pelo menos 1 caixa se há demanda
-                if sugestao_quantidade == 0 and media_venda_dia > 0:
-                    sugestao_quantidade = itens_por_caixa
+            # Sempre arredonda para CIMA (ex: 1.4 caixas → 2 caixas)
+            sugestao_quantidade = sugestao_quantidade - resto + itens_por_caixa
     else:
         sugestao_quantidade = round(sugestao_quantidade)
 
-    # Regra de multiplicação por estoque crítico (baseado em dias de cobertura)
+    # Garantir pelo menos 1 caixa se produto é vendido em caixa e tem sugestão > 0
     multiplicacao = False
-    dias_cobertura_estoque = estoque_atual / max(media_venda_dia, 0.01)
-    if dias_cobertura_estoque < 3 and sugestao_quantidade > 0:
+    unidade_produto = produto.get('unidade', 'UN').upper()
+    eh_produto_caixa = unidade_produto not in ['UN', 'UNT']
+
+    if eh_produto_caixa and sugestao_quantidade > 0:
         sugestao_quantidade = max(sugestao_quantidade, itens_por_caixa)
         multiplicacao = True
 

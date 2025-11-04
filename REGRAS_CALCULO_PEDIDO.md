@@ -63,28 +63,11 @@ SE produto nunca vendeu E estoque = 0
 
 ---
 
-#### **REGRA 2: Produtos Parados Há Muito Tempo São Descartados**
+#### **REGRA 2: Produtos com Estoque Recebem Ajuste de Data**
 
-**Situação B: Produto com estoque mas parado há mais de 90 dias**
+**Situação B: Produto com estoque e vendendo**
 ```
-SE estoque > 0 E última venda foi há mais de 90 dias
-→ DESCARTA produto (estoque morto)
-```
-
-**Exemplo:**
-- Estoque atual: 50 unidades
-- Última venda: 15/07/2024 (há 150 dias)
-- **Decisão:** Não compra (produto parado, libera capital)
-
-**Justificativa:** Evita acumular mais estoque de produtos sem giro.
-
----
-
-#### **REGRA 3: Produtos com Estoque Recebem Ajuste de Data**
-
-**Situação C: Produto com estoque e vendendo**
-```
-SE estoque > 0 E última venda foi há menos de 90 dias
+SE estoque > 0
 → Sistema ASSUME que vendeu hoje (considera demanda ativa)
 ```
 
@@ -98,9 +81,9 @@ SE estoque > 0 E última venda foi há menos de 90 dias
 
 ---
 
-#### **REGRA 4: Ajuste de Datas Inconsistentes**
+#### **REGRA 3: Ajuste de Datas Inconsistentes**
 
-**Situação D: Data de venda no futuro**
+**Situação A: Data de venda no futuro**
 ```
 SE última venda está no futuro (erro de cadastro)
 → Ajusta para HOJE
@@ -113,7 +96,7 @@ SE última venda está no futuro (erro de cadastro)
 
 ---
 
-**Situação E: Data de compra após data de venda (inconsistência)**
+**Situação B: Data de compra após data de venda (inconsistência)**
 ```
 SE data da última compra >= data da última venda
 → Ajusta data de compra para [prazo da política] dias antes da venda
@@ -137,7 +120,7 @@ SE data da última compra >= data da última venda
 
 ---
 
-**Situação F: Sem data de compra (produto muito antigo)**
+**Situação C: Sem data de compra (produto muito antigo)**
 ```
 SE não há registro de data de compra
 → Assume compra foi [prazo da política] dias antes da última venda
@@ -151,7 +134,7 @@ SE não há registro de data de compra
 
 ---
 
-#### **REGRA 5: Cálculo da Média Diária de Vendas**
+#### **REGRA 4: Cálculo da Média Diária de Vendas**
 
 ```
 Período de análise = Data última venda - Data última compra
@@ -167,7 +150,7 @@ Média diária = Quantidade vendida no período ÷ Período em dias
 
 ---
 
-#### **REGRA 6: Cálculo da Sugestão Base**
+#### **REGRA 5: Cálculo da Sugestão Base**
 
 ```
 Sugestão base = (Média diária × Prazo de estoque da política) - Estoque atual
@@ -186,50 +169,35 @@ Sugestão base = (Média diária × Prazo de estoque da política) - Estoque atu
 
 ---
 
-#### **REGRA 7: Margem de Segurança para Risco de Ruptura (25%)**
+#### **REGRA 6: Margem de Segurança para Estoque Zerado (25%)**
 
-**NOVA REGRA:** Sistema adiciona 25% a mais quando identifica risco de ruptura.
+Sistema adiciona 25% a mais **APENAS quando produto está com estoque zerado**.
 
-**Critério 1: Dias de cobertura muito baixos**
+**Critério:**
 ```
-Dias de cobertura = Estoque atual ÷ Média diária
-
-SE dias de cobertura < 3 dias
+SE estoque atual = 0
 → Adiciona 25% na sugestão
 ```
 
-**Exemplo 1:**
-- Estoque atual: 2 unidades
+**Exemplo:**
+- Estoque atual: 0 unidades
 - Média diária: 10 unidades/dia
-- Dias de cobertura: 2 ÷ 10 = **0.2 dias** (menos de 1 dia!)
-- Sugestão base: 298 unidades
-- **Margem aplicada:** 298 × 1.25 = **372.5 ≈ 373 unidades**
+- Prazo: 30 dias
+- Sugestão base: (10 × 30) - 0 = 300 unidades
+- **Margem aplicada:** 300 × 1.25 = **375 unidades**
 - **Buffer extra:** 7.5 dias de proteção contra atrasos
-
-**Critério 2: Estoque crítico com alta rotação**
-```
-SE estoque < 2 unidades E média > 0.5 unidades/dia
-→ Adiciona 25% na sugestão
-```
-
-**Exemplo 2:**
-- Estoque atual: 1 unidade
-- Média diária: 2 unidades/dia
-- Sugestão base: 59 unidades
-- **Margem aplicada:** 59 × 1.25 = **73.75 ≈ 74 unidades**
 
 **Justificativa:** Protege contra rupturas causadas por:
 - Atrasos na entrega do fornecedor
 - Picos inesperados de demanda
-- Erros de contagem de estoque
+- Produto completamente sem estoque (risco máximo)
 
 **Quando NÃO aplica:**
-- Produto com boa cobertura (≥ 3 dias)
-- Produto de baixíssima rotação (≤ 0.5/dia), mesmo com estoque baixo
+- Produto com qualquer estoque (> 0 unidades)
 
 ---
 
-#### **REGRA 8: Arredondamento por Embalagem**
+#### **REGRA 7: Arredondamento por Embalagem (SEMPRE PARA CIMA)**
 
 Muitos fornecedores vendem em caixas fechadas.
 
@@ -237,70 +205,61 @@ Muitos fornecedores vendem em caixas fechadas.
 ```
 Resto = Sugestão ÷ Itens por caixa
 
-SE resto >= metade da caixa
-→ Arredonda para CIMA (próxima caixa cheia)
-
-SE resto < metade da caixa
-→ Arredonda para BAIXO
-   MAS se ficar zero E produto tem demanda
-   → Garante pelo menos 1 caixa
+SE resto > 0
+→ SEMPRE arredonda para CIMA (próxima caixa cheia)
 ```
 
-**Exemplo 1: Arredonda para CIMA**
-- Sugestão: 47 unidades
+**Exemplo 1: 1.4 caixas → 2 caixas**
+- Sugestão: 17 unidades
 - Itens por caixa: 12
-- Resto: 47 ÷ 12 = 3 caixas + sobra de 11 unidades
-- Como 11 ≥ 6 (metade de 12)
-- **Resultado:** 48 unidades (4 caixas completas)
+- Caixas: 17 ÷ 12 = 1.4 caixas
+- **Resultado:** 24 unidades (2 caixas completas) ✅
 
-**Exemplo 2: Arredonda para BAIXO**
-- Sugestão: 41 unidades
+**Exemplo 2: 3.1 caixas → 4 caixas**
+- Sugestão: 37 unidades
 - Itens por caixa: 12
-- Resto: 41 ÷ 12 = 3 caixas + sobra de 5 unidades
-- Como 5 < 6 (metade de 12)
-- **Resultado:** 36 unidades (3 caixas completas)
+- Caixas: 37 ÷ 12 = 3.08 caixas
+- **Resultado:** 48 unidades (4 caixas completas) ✅
 
-**Exemplo 3: Proteção contra zerar produto com demanda**
-- Sugestão: 5 unidades
+**Exemplo 3: 5.9 caixas → 6 caixas**
+- Sugestão: 71 unidades
 - Itens por caixa: 12
-- Resto: 5 ÷ 12 = 0 caixas + sobra de 5
-- Arredondaria para 0, MAS produto tem média de 2 unidades/dia
-- **Proteção ativada:** Garante 12 unidades (1 caixa)
+- Caixas: 71 ÷ 12 = 5.9 caixas
+- **Resultado:** 72 unidades (6 caixas completas) ✅
 
-**Justificativa:** Não descartar produtos com demanda real por questão de arredondamento.
+**Justificativa:** Garante que nunca faltará produto por questão de arredondamento. Melhor comprar um pouco a mais do que arriscar ruptura.
 
 ---
 
-#### **REGRA 9: Proteção de Estoque Crítico Dinâmica**
+#### **REGRA 8: Proteção de 1 Caixa Mínima (Produtos em Caixa)**
 
-**NOVA REGRA:** Baseada em dias de cobertura, não em unidades fixas.
+**REGRA:** Garante pelo menos 1 caixa completa para produtos vendidos em caixa.
 
 ```
-Dias de cobertura do estoque = Estoque atual ÷ Média diária
-
-SE dias de cobertura < 3 dias
+SE produto é vendido em caixa (unidade ≠ UN, UNT) E sugestão > 0
 → Garante compra de pelo menos 1 caixa completa
 ```
 
-**Exemplo 1: Alta rotação com estoque baixo**
-- Estoque: 5 unidades
-- Média: 10 unidades/dia
-- Dias de cobertura: 5 ÷ 10 = **0.5 dias**
+**Identificação de Produto em Caixa:**
+- Unidade = "CX", "PCT", "FD", etc. → Produto em caixa ✅
+- Unidade = "UN" ou "UNT" → Produto unitário ❌ (não aplica)
+
+**Exemplo 1: Produto em caixa com sugestão baixa**
+- Unidade: CX
 - Sugestão após arredondamento: 8 unidades
 - Itens por caixa: 12
 - **Proteção:** Garante 12 unidades (1 caixa completa)
 
-**Exemplo 2: Baixa rotação com estoque baixo (NÃO aplica)**
-- Estoque: 1 unidade
-- Média: 0.3 unidades/dia
-- Dias de cobertura: 1 ÷ 0.3 = **3.3 dias** (mais de 3!)
-- **Não aplica proteção** (produto de baixíssimo giro)
+**Exemplo 2: Produto unitário (NÃO aplica)**
+- Unidade: UN
+- Sugestão: 8 unidades
+- **Não aplica proteção** (produto unitário)
 
-**Justificativa:** Produtos de alta rotação precisam de proteção maior. Produtos de baixa rotação não precisam de compras forçadas.
+**Justificativa:** Produtos vendidos em caixa precisam de compra mínima de 1 caixa. Produtos unitários podem ter qualquer quantidade.
 
 ---
 
-#### **REGRA 10: Cálculo de Valores**
+#### **REGRA 9: Cálculo de Valores**
 
 ```
 Valor total do produto (sem desconto) = Quantidade × Valor unitário
@@ -386,8 +345,7 @@ Um produto é **DESCARTADO** (não entra no pedido) nas seguintes situações:
 | # | Situação | Motivo |
 |---|----------|--------|
 | 1 | Nunca vendeu E estoque = 0 | Sem demanda comprovada |
-| 2 | Estoque > 0 E parado há > 90 dias | Estoque morto, sem giro |
-| 3 | Sugestão calculada ≤ 0 | Estoque atual já é suficiente |
+| 2 | Sugestão calculada ≤ 0 | Estoque atual já é suficiente |
 
 ---
 
@@ -397,10 +355,9 @@ O sistema AUMENTA a compra nas seguintes situações:
 
 | # | Situação | Ação | Motivo |
 |---|----------|------|--------|
-| 1 | Cobertura < 3 dias | +25% | Risco de ruptura |
-| 2 | Estoque < 2 E alta rotação | +25% | Risco de ruptura |
-| 3 | Arredondaria para zero com demanda | +1 caixa | Garantir giro |
-| 4 | Cobertura < 3 dias após arredondamento | +1 caixa mínimo | Proteção crítica |
+| 1 | Estoque = 0 | +25% | Risco de ruptura (produto zerado) |
+| 2 | Arredondamento de caixa | Sempre para CIMA | Nunca faltar por arredondamento |
+| 3 | Produto em caixa com sugestão > 0 | +1 caixa mínimo | Garantir quantidade mínima |
 
 ---
 
@@ -619,6 +576,13 @@ Produtos com estoque e sem venda há mais de 90 dias são automaticamente descar
 ---
 
 ## 📅 HISTÓRICO DE ATUALIZAÇÕES
+
+**Versão 3.0 - Janeiro 2025 (Alinhamento com Planilha Cliente)**
+- ✅ Removido descarte de produtos parados > 90 dias
+- ✅ Margem 25% aplicada APENAS quando estoque = 0
+- ✅ Arredondamento SEMPRE PARA CIMA (nunca para baixo)
+- ✅ Proteção de 1 caixa baseada em unidade do produto (CX, PCT, etc.)
+- ✅ Mantido ajuste de datas inconsistentes
 
 **Versão 2.0 - Janeiro 2025**
 - ✅ Adicionada margem de segurança de 25% para risco de ruptura
