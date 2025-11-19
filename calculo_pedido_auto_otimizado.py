@@ -563,13 +563,22 @@ def calcular_sugestao_with_monitoring(produto: Dict, politica: Dict, media_venda
 def calcular_valores_with_monitoring(produto: Dict, politica: Dict, sugestao_quantidade: float,
                                    rules: CalculationRules, produto_id: int) -> tuple:
     valor_de_compra = produto.get('valor_de_compra') or 0
-    valor_total_produto = sugestao_quantidade * valor_de_compra
+    itens_por_caixa = produto.get('itens_por_caixa') or 1
+    
+    # CORREÇÃO: Se o produto é vendido em caixa (itens_por_caixa > 1), o valor_de_compra é o preço da CAIXA.
+    # A sugestao_quantidade está em UNIDADES.
+    # Portanto, precisamos converter unidades para caixas antes de multiplicar pelo preço.
+    quantidade_compras = sugestao_quantidade / itens_por_caixa
+    
+    valor_total_produto = quantidade_compras * valor_de_compra
     desconto = politica.get('desconto') or 0
     valor_total_produto_com_desconto = valor_total_produto * (1 - desconto / 100)
     
-    rules.add_rule("VALUES_CALCULATED", "Valores calculados", produto_id, data={
-        "valor_unitario": valor_de_compra,
-        "quantidade": sugestao_quantidade,
+    rules.add_rule("VALUES_CALCULATED", "Valores calculados (Corrigido por Caixa)", produto_id, data={
+        "valor_unitario_ou_caixa": valor_de_compra,
+        "itens_por_caixa": itens_por_caixa,
+        "quantidade_unidades": sugestao_quantidade,
+        "quantidade_compras_considerada": quantidade_compras,
         "valor_total": valor_total_produto,
         "desconto": desconto,
         "valor_com_desconto": valor_total_produto_com_desconto
