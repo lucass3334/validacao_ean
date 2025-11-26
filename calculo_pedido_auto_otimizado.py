@@ -3,6 +3,7 @@ from pydantic import BaseModel
 from typing import Dict, List, Optional, Any
 import requests
 from datetime import datetime, timedelta
+import math
 import os
 import logging
 from dateutil import parser
@@ -58,6 +59,12 @@ class CalculationRules:
             "produto_id": produto_id,
             "timestamp": datetime.now().isoformat()
         })
+
+def round_up_to_multiple(value: float, multiple: int) -> float:
+    """Arredonda value para cima para o próximo múltiplo de multiple."""
+    if multiple <= 1:
+        return round(value)
+    return math.ceil(value / multiple) * multiple
 
 @router.post("/calcular")
 async def calcular_pedido(fornecedor: FornecedorID):
@@ -223,6 +230,7 @@ def fetch_products_with_monitoring(fornecedor_id: int, rules: CalculationRules) 
                 "codigo_produto": produto.get('codigo_produto'),
                 "estoque_atual": produto.get('estoque_atual'),
                 "valor_de_compra": produto.get('valor_de_compra'),
+                "precocusto": produto.get('precocusto'),
                 "itens_por_caixa": produto.get('itens_por_caixa')
             })
         
@@ -520,22 +528,14 @@ def calcular_sugestao_with_monitoring(produto: Dict, politica: Dict, media_venda
     if sugestao_inicial <= 0:
         return 0, False
 
-    # Ajustar por embalagem - SEMPRE ARREDONDAR PARA CIMA
+    # Ajustar por embalagem - SEMPRE ARREDONDAR PARA CIMA para o próximo múltiplo de itens_por_caixa
     if itens_por_caixa > 1:
-        resto = sugestao_inicial % itens_por_caixa
-        if resto != 0:
-            # Sempre arredonda para CIMA (ex: 1.4 caixas → 2 caixas)
-            sugestao_quantidade = sugestao_inicial - resto + itens_por_caixa
-            rules.add_rule("PACKAGE_ROUND_UP", "Arredondado para CIMA por embalagem", produto_id, data={
-                "sugestao_inicial": sugestao_inicial,
-                "resto": resto,
-                "itens_por_caixa": itens_por_caixa,
-                "caixas_antes": round(sugestao_inicial / itens_por_caixa, 2),
-                "caixas_depois": int(sugestao_quantidade / itens_por_caixa),
-                "sugestao_final": sugestao_quantidade
-            })
-        else:
-            sugestao_quantidade = sugestao_inicial
+        sugestao_quantidade = round_up_to_multiple(sugestao_inicial, itens_por_caixa)
+        rules.add_rule("PACKAGE_ROUND_UP", "Arredondado para múltiplo da caixa", produto_id, data={
+            "sugestao_inicial": sugestao_inicial,
+            "itens_por_caixa": itens_por_caixa,
+            "sugestao_final": sugestao_quantidade
+        })
     else:
         sugestao_quantidade = round(sugestao_inicial)
         rules.add_rule("SIMPLE_ROUND", "Arredondamento simples", produto_id, data={
@@ -562,9 +562,10 @@ def calcular_sugestao_with_monitoring(produto: Dict, politica: Dict, media_venda
 
 def calcular_valores_with_monitoring(produto: Dict, politica: Dict, sugestao_quantidade: float,
                                    rules: CalculationRules, produto_id: int) -> tuple:
-    valor_de_compra = produto.get('valor_de_compra') or 0
+    preco_custo = produto.get('precocusto')
+    valor_de_compra = preco_custo if preco_custo is not None else (produto.get('valor_de_compra') or 0)
     itens_por_caixa = produto.get('itens_por_caixa') or 1
-    
+
     # CORREÇÃO: Se o produto é vendido em caixa (itens_por_caixa > 1), o valor_de_compra é o preço da CAIXA.
     # A sugestao_quantidade está em UNIDADES.
     # Portanto, precisamos converter unidades para caixas antes de multiplicar pelo preço.
@@ -573,9 +574,11 @@ def calcular_valores_with_monitoring(produto: Dict, politica: Dict, sugestao_qua
     valor_total_produto = quantidade_compras * valor_de_compra
     desconto = politica.get('desconto') or 0
     valor_total_produto_com_desconto = valor_total_produto * (1 - desconto / 100)
-    
+
     rules.add_rule("VALUES_CALCULATED", "Valores calculados (Corrigido por Caixa)", produto_id, data={
         "valor_unitario_ou_caixa": valor_de_compra,
+        "preco_custo": preco_custo,
+        "valor_de_compra_original": produto.get('valor_de_compra'),
         "itens_por_caixa": itens_por_caixa,
         "quantidade_unidades": sugestao_quantidade,
         "quantidade_compras_considerada": quantidade_compras,
@@ -931,12 +934,9 @@ def calcular_sugestao(produto: Dict, politica: Dict, media_venda_dia: float, qua
     if sugestao_quantidade <= 0:
         return 0, False
 
-    # Ajustar por embalagem - SEMPRE ARREDONDAR PARA CIMA
+    # Ajustar por embalagem - SEMPRE ARREDONDAR PARA CIMA para o próximo múltiplo de itens_por_caixa
     if itens_por_caixa > 1:
-        resto = sugestao_quantidade % itens_por_caixa
-        if resto != 0:
-            # Sempre arredonda para CIMA (ex: 1.4 caixas → 2 caixas)
-            sugestao_quantidade = sugestao_quantidade - resto + itens_por_caixa
+        sugestao_quantidade = round_up_to_multiple(sugestao_quantidade, itens_por_caixa)
     else:
         sugestao_quantidade = round(sugestao_quantidade)
 
@@ -952,7 +952,8 @@ def calcular_sugestao(produto: Dict, politica: Dict, media_venda_dia: float, qua
     return sugestao_quantidade, multiplicacao
 
 def calcular_valores(produto: Dict, politica: Dict, sugestao_quantidade: float) -> tuple:
-    valor_de_compra = produto.get('valor_de_compra') or 0
+    preco_custo = produto.get('precocusto')
+    valor_de_compra = preco_custo if preco_custo is not None else (produto.get('valor_de_compra') or 0)
     valor_total_produto = sugestao_quantidade * valor_de_compra
     desconto = politica.get('desconto') or 0
     valor_total_produto_com_desconto = valor_total_produto * (1 - desconto / 100)
