@@ -670,8 +670,9 @@ def find_best_policy_among_results(resultado: List[Dict], rules: CalculationRule
     rules.add_rule("BEST_POLICY_SELECTION", f"Selecionando melhor entre {len(resultado)} políticas que atingiram valor mínimo")
 
     for item in resultado:
-        desconto = item.get('desconto', 0)
-        prazo_estoque = item.get('prazo_estoque', float('inf'))
+        # Usar 'or' para tratar None como 0 (desconto pode existir mas ser None)
+        desconto = item.get('desconto') or 0
+        prazo_estoque = item.get('prazo_estoque') or float('inf')
         politica_id = item.get('politica_id')
 
         if desconto > melhor_desconto or (desconto == melhor_desconto and prazo_estoque < menor_prazo):
@@ -1006,8 +1007,9 @@ def find_best_policy_among_results_simple(resultado: List[Dict]) -> Optional[int
     melhor_politica_id = None
 
     for item in resultado:
-        desconto = item.get('desconto', 0)
-        prazo_estoque = item.get('prazo_estoque', float('inf'))
+        # Usar 'or' para tratar None como 0 (desconto pode existir mas ser None)
+        desconto = item.get('desconto') or 0
+        prazo_estoque = item.get('prazo_estoque') or float('inf')
 
         if desconto > melhor_desconto or (desconto == melhor_desconto and prazo_estoque < menor_prazo):
             melhor_desconto = desconto
