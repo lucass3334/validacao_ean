@@ -960,19 +960,21 @@ def calcular_valores(produto: Dict, politica: Dict, sugestao_quantidade: float) 
     valor_total_produto_com_desconto = valor_total_produto * (1 - desconto / 100)
     return valor_total_produto, valor_total_produto_com_desconto
 
-def montar_detalhes_produto(produto: Dict, quantidade_vendida: float, periodo_venda: int, 
-                          sugestao_quantidade: float, valor_total_produto: float, 
-                          valor_total_produto_com_desconto: float, multiplicacao: bool, 
-                          id_produto_bling: int, data_ultima_venda_str: str, 
+def montar_detalhes_produto(produto: Dict, quantidade_vendida: float, periodo_venda: int,
+                          sugestao_quantidade: float, valor_total_produto: float,
+                          valor_total_produto_com_desconto: float, multiplicacao: bool,
+                          id_produto_bling: int, data_ultima_venda_str: str,
                           data_ultima_compra_str: str) -> Dict:
     return {
         'produto_id': produto['produto_id'],
         'codigo_do_produto': produto.get('codigo_produto'),
+        'nome_produto': produto.get('nome_produto'),
         'quantidade_vendida': quantidade_vendida,
         'periodo_venda': periodo_venda,
         'sugestao_quantidade': sugestao_quantidade,
         'valor_total_produto': valor_total_produto,
         'valor_total_produto_com_desconto': valor_total_produto_com_desconto,
+        'valor_de_compra': produto.get('valor_de_compra') or produto.get('precocusto') or 0,
         'estoque_atual': produto.get('estoque_atual') or 0,
         'data_ultima_venda': data_ultima_venda_str,
         'data_ultima_compra': data_ultima_compra_str,
