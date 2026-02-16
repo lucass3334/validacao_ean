@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 
 class FornecedorID(BaseModel):
     fornecedor_id: int
+    empresa_id: int
 
 class CalculationRules:
     """Classe para armazenar e documentar as regras aplicadas durante o cálculo"""
@@ -71,7 +72,8 @@ async def calcular_pedido(fornecedor: FornecedorID):
     """Endpoint original mantido para compatibilidade"""
     try:
         fornecedor_id = fornecedor.fornecedor_id
-        logger.info(f"Iniciando cálculo para fornecedor_id: {fornecedor_id}")
+        empresa_id = fornecedor.empresa_id
+        logger.info(f"Iniciando cálculo para fornecedor_id: {fornecedor_id}, empresa_id: {empresa_id}")
 
         # Passo 1: Buscar políticas e produtos
         politicas = fetch_policies(fornecedor_id)
@@ -88,8 +90,11 @@ async def calcular_pedido(fornecedor: FornecedorID):
         produto_ids = [p['produto_id'] for p in produtos]
         produtos_datas = fetch_produto_datas(produto_ids)
 
+        # Passo 2.1: Buscar dados do penúltimo pedido para detecção de anomalias
+        penultimo_map = fetch_penultimo_pedido(produto_ids, empresa_id)
+
         # Passo 3: Processar o cálculo
-        resultado = process_calculation(politicas, produtos, produtos_datas)
+        resultado = process_calculation(politicas, produtos, produtos_datas, penultimo_map)
 
         logger.info("Cálculo concluído com sucesso.")
         return resultado
@@ -102,7 +107,7 @@ async def calcular_pedido(fornecedor: FornecedorID):
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/monitoramento/{fornecedor_id}")
-async def monitoramento_calculo(fornecedor_id: int):
+async def monitoramento_calculo(fornecedor_id: int, empresa_id: int = None):
     """
     Endpoint de monitoramento completo que mostra:
     - Todas as informações coletadas
@@ -111,38 +116,52 @@ async def monitoramento_calculo(fornecedor_id: int):
     - Resultado final detalhado
     """
     calculation_rules = CalculationRules()
-    
+
     try:
-        calculation_rules.add_rule("INICIO", f"Iniciando monitoramento para fornecedor_id: {fornecedor_id}")
-        
+        calculation_rules.add_rule("INICIO", f"Iniciando monitoramento para fornecedor_id: {fornecedor_id}, empresa_id: {empresa_id}")
+
         # === COLETA DE DADOS BASE ===
-        logger.info(f"[MONITORAMENTO] Iniciando para fornecedor_id: {fornecedor_id}")
-        
+        logger.info(f"[MONITORAMENTO] Iniciando para fornecedor_id: {fornecedor_id}, empresa_id: {empresa_id}")
+
         # 1. Buscar políticas
         calculation_rules.add_rule("FETCH_POLICIES", "Buscando políticas de compra")
         politicas = fetch_policies_with_monitoring(fornecedor_id, calculation_rules)
-        
+
         if not politicas:
             calculation_rules.add_error("Nenhuma política de compra encontrada")
             return build_monitoring_response(calculation_rules, None, None, None, None)
-        
+
+        # Extrair empresa_id das políticas se não foi fornecido
+        if empresa_id is None and politicas:
+            empresa_id = politicas[0].get('empresa_id')
+            if empresa_id:
+                calculation_rules.add_rule("EMPRESA_ID_EXTRACTED", f"empresa_id extraído das políticas: {empresa_id}")
+
         # 2. Buscar produtos
         calculation_rules.add_rule("FETCH_PRODUCTS", "Buscando produtos do fornecedor")
         produtos = fetch_products_with_monitoring(fornecedor_id, calculation_rules)
-        
+
         if not produtos:
             calculation_rules.add_error("Nenhum produto encontrado")
             return build_monitoring_response(calculation_rules, politicas, None, None, None)
-        
+
         # 3. Buscar histórico de vendas/compras
         produto_ids = [p['produto_id'] for p in produtos]
         calculation_rules.add_rule("FETCH_HISTORY", f"Buscando histórico para {len(produto_ids)} produtos")
         produtos_datas = fetch_produto_datas_with_monitoring(produto_ids, calculation_rules)
-        
+
+        # 3.1 Buscar dados do penúltimo pedido para detecção de anomalias
+        penultimo_map = {}
+        if empresa_id:
+            calculation_rules.add_rule("FETCH_PENULTIMO", "Buscando dados do penúltimo pedido para detecção de anomalias")
+            penultimo_map = fetch_penultimo_pedido_with_monitoring(produto_ids, empresa_id, calculation_rules)
+        else:
+            calculation_rules.add_warning("empresa_id não disponível - detecção de anomalias desativada")
+
         # === PROCESSAMENTO DETALHADO ===
         calculation_rules.add_rule("START_PROCESSING", "Iniciando processamento detalhado")
         resultado_detalhado = process_calculation_with_monitoring(
-            politicas, produtos, produtos_datas, calculation_rules
+            politicas, produtos, produtos_datas, calculation_rules, penultimo_map
         )
         
         calculation_rules.add_rule("FINISH", "Cálculo concluído com sucesso")
@@ -308,9 +327,38 @@ def fetch_max_data_compra_with_monitoring(produto_ids: list, rules: CalculationR
         rules.add_error(f"Exceção ao buscar datas de compra: {str(e)}")
         raise
 
+def fetch_penultimo_pedido_with_monitoring(produto_ids: list, empresa_id: int, rules: CalculationRules) -> Dict:
+    """Busca dados do penúltimo pedido de compra para detecção de anomalias"""
+    try:
+        url = f"{API_URL_BASE}/rest/v1/rpc/get_penultimo_pedido_compra"
+        payload = {"p_produto_ids": produto_ids, "p_empresa_id": empresa_id}
+        response = requests.post(url, headers=HEADERS, json=payload)
+
+        if response.status_code != 200:
+            rules.add_warning(f"Não foi possível buscar penúltimo pedido: {response.text}")
+            return {}
+
+        penultimo_data = response.json()
+        result = {}
+        for item in penultimo_data:
+            produto_id = item.get('produto_id')
+            if produto_id:
+                result[produto_id] = {
+                    'qtd_penultima': item.get('qtd_penultima_compra'),
+                    'intervalo': item.get('intervalo_dias'),
+                    'data_penultima': item.get('data_penultima_compra')
+                }
+
+        rules.add_rule("PENULTIMO_PEDIDO_COLLECTED", f"Dados do penúltimo pedido coletados para {len(result)} produtos")
+        return result
+    except Exception as e:
+        rules.add_warning(f"Exceção ao buscar penúltimo pedido: {str(e)}")
+        return {}
+
 def process_calculation_with_monitoring(politicas: List[Dict], produtos: List[Dict],
-                                      produtos_datas: Dict, rules: CalculationRules) -> list:
+                                      produtos_datas: Dict, rules: CalculationRules, penultimo_map: Dict = None) -> list:
     resultado = []
+    penultimo_map = penultimo_map or {}
 
     # Cache para id_produto_bling
     id_produto_bling_cache = {}
@@ -331,7 +379,7 @@ def process_calculation_with_monitoring(politicas: List[Dict], produtos: List[Di
             try:
                 # Processar produto com monitoramento detalhado
                 produto_processado = process_product_with_monitoring(
-                    produto, politica, produtos_datas, rules, id_produto_bling_cache
+                    produto, politica, produtos_datas, rules, id_produto_bling_cache, penultimo_map
                 )
                 
                 if produto_processado is None:
@@ -385,9 +433,10 @@ def process_calculation_with_monitoring(politicas: List[Dict], produtos: List[Di
 
     return resultado
 
-def process_product_with_monitoring(produto: Dict, politica: Dict, produtos_datas: Dict, 
-                                   rules: CalculationRules, cache: Dict) -> Optional[Dict]:
+def process_product_with_monitoring(produto: Dict, politica: Dict, produtos_datas: Dict,
+                                   rules: CalculationRules, cache: Dict, penultimo_map: Dict = None) -> Optional[Dict]:
     produto_id = produto['produto_id']
+    penultimo_map = penultimo_map or {}
     
     try:
         # Obter dados do histórico
@@ -435,11 +484,36 @@ def process_product_with_monitoring(produto: Dict, politica: Dict, produtos_data
 
         # Calcular média de vendas diárias
         media_venda_dia = quantidade_vendida / periodo_venda
-        rules.add_rule("DAILY_AVERAGE_CALCULATED", f"Média diária calculada: {media_venda_dia:.2f}", 
+
+        # DETECÇÃO DE ANOMALIA: usar penúltimo pedido para validar média
+        penultimo_data = penultimo_map.get(produto_id)
+        anomalia_detectada = False
+        if penultimo_data:
+            intervalo = penultimo_data.get('intervalo')
+            qtd_penultima = penultimo_data.get('qtd_penultima')
+
+            # Validar intervalo (entre 7 e 180 dias)
+            if intervalo and qtd_penultima and 7 <= intervalo <= 180:
+                media_esperada = qtd_penultima / intervalo
+
+                # Se média atual > 2.5x média esperada, corrigir
+                if media_venda_dia > media_esperada * 2.5:
+                    media_original = media_venda_dia
+                    media_venda_dia = media_esperada
+                    anomalia_detectada = True
+
+                    rules.add_warning(
+                        f"Anomalia detectada: média {media_original:.2f}/dia corrigida para {media_esperada:.2f}/dia "
+                        f"(baseado em penúltimo pedido: {qtd_penultima} unid em {intervalo} dias)",
+                        produto_id
+                    )
+
+        rules.add_rule("DAILY_AVERAGE_CALCULATED", f"Média diária calculada: {media_venda_dia:.2f}" + (" (corrigida)" if anomalia_detectada else ""),
                       produto_id, data={
                           "quantidade_vendida": quantidade_vendida,
                           "periodo_venda": periodo_venda,
-                          "media_venda_dia": media_venda_dia
+                          "media_venda_dia": media_venda_dia,
+                          "anomalia_corrigida": anomalia_detectada
                       })
 
         # Calcular sugestão de quantidade
@@ -789,6 +863,28 @@ def fetch_max_data_compra(produto_ids: list) -> Dict:
     compras_data = response.json()
     return {item['produto_id']: item['max_data_compra'] for item in compras_data}
 
+def fetch_penultimo_pedido(produto_ids: list, empresa_id: int) -> Dict:
+    """Busca dados do penúltimo pedido de compra para detecção de anomalias"""
+    url = f"{API_URL_BASE}/rest/v1/rpc/get_penultimo_pedido_compra"
+    payload = {"p_produto_ids": produto_ids, "p_empresa_id": empresa_id}
+    response = requests.post(url, headers=HEADERS, json=payload)
+
+    if response.status_code != 200:
+        logger.warning(f"Erro ao buscar penúltimo pedido: {response.text}")
+        return {}
+
+    penultimo_data = response.json()
+    result = {}
+    for item in penultimo_data:
+        produto_id = item.get('produto_id')
+        if produto_id:
+            result[produto_id] = {
+                'qtd_penultima': item.get('qtd_penultima_compra'),
+                'intervalo': item.get('intervalo_dias'),
+                'data_penultima': item.get('data_penultima_compra')
+            }
+    return result
+
 def fetch_id_produto_bling(produto_id: int) -> int:
     url = f"{API_URL_BASE}/rest/v1/produtos?id=eq.{produto_id}"
     response = requests.get(url, headers=HEADERS)
@@ -800,8 +896,9 @@ def fetch_id_produto_bling(produto_id: int) -> int:
     result = response.json()
     return result[0]['id_produto_bling'] if result else None
 
-def process_calculation(politicas: List[Dict], produtos: List[Dict], produtos_datas: Dict) -> list:
+def process_calculation(politicas: List[Dict], produtos: List[Dict], produtos_datas: Dict, penultimo_map: Dict = None) -> list:
     resultado = []
+    penultimo_map = penultimo_map or {}
 
     id_produto_bling_cache = {}
 
@@ -837,6 +934,21 @@ def process_calculation(politicas: List[Dict], produtos: List[Dict], produtos_da
             )
 
             media_venda_dia = quantidade_vendida / periodo_venda
+
+            # DETECÇÃO DE ANOMALIA: usar penúltimo pedido para validar média
+            penultimo_data = penultimo_map.get(produto_id)
+            if penultimo_data:
+                intervalo = penultimo_data.get('intervalo')
+                qtd_penultima = penultimo_data.get('qtd_penultima')
+
+                # Validar intervalo (entre 7 e 180 dias)
+                if intervalo and qtd_penultima and 7 <= intervalo <= 180:
+                    media_esperada = qtd_penultima / intervalo
+
+                    # Se média atual > 2.5x média esperada, corrigir
+                    if media_venda_dia > media_esperada * 2.5:
+                        logger.info(f"Produto {produto_id}: Anomalia detectada - média {media_venda_dia:.2f}/dia corrigida para {media_esperada:.2f}/dia")
+                        media_venda_dia = media_esperada
 
             sugestao_quantidade, multiplicacao = calcular_sugestao(produto, politica, media_venda_dia, quantidade_vendida)
 
