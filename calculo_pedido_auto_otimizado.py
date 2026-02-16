@@ -496,8 +496,8 @@ def process_product_with_monitoring(produto: Dict, politica: Dict, produtos_data
             if intervalo and qtd_penultima and 7 <= intervalo <= 180:
                 media_esperada = qtd_penultima / intervalo
 
-                # Se média atual > 2.5x média esperada, corrigir
-                if media_venda_dia > media_esperada * 2.5:
+                # Se média atual > 3.0x média esperada, corrigir
+                if media_venda_dia > media_esperada * 3.0:
                     media_original = media_venda_dia
                     media_venda_dia = media_esperada
                     anomalia_detectada = True
