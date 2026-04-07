@@ -31,23 +31,19 @@ def _rate_limit():
 
 
 def _buscar_cobasi(ean: str):
+    """Busca na Cobasi e extrai imagem direto da pagina de busca (1 request so)."""
     html = cobasi_buscar_html(ean)
     if not html:
         return None
-    nome, url_produto = cobasi_extrair(html)
-    if not nome or not url_produto:
-        return None
-    # Get image from product page
     try:
         from bs4 import BeautifulSoup
-        resp = http_requests.get(url_produto, headers={
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        }, timeout=15)
-        if resp.status_code == 200:
-            soup = BeautifulSoup(resp.text, 'html.parser')
-            img = soup.find('img', alt='Imagem do Produto')
-            if img and img.get('src'):
-                return {'ean': ean, 'nome': nome, 'imagem_url': img['src'], 'source': 'cobasi'}
+        soup = BeautifulSoup(html, 'html.parser')
+        # Extrair imagem direto do resultado de busca (sem navegar pro produto)
+        for img in soup.find_all('img', alt=True):
+            src = img.get('src', '') or img.get('data-src', '')
+            alt = img.get('alt', '')
+            if src and alt and ('vtexassets.com' in src or 'cobasi.com.br' in src) and 'logo' not in src.lower():
+                return {'ean': ean, 'nome': alt.strip(), 'imagem_url': src, 'source': 'cobasi'}
     except Exception:
         pass
     return None
@@ -165,21 +161,20 @@ def _processar_batch(produtos: list[dict], webhook_url: str, catalogo_id: int | 
     resultados = []
     for prod in produtos:
         try:
-            _rate_limit()
             ean = prod['ean']
             nome = prod['nome']
 
-            # Try EAN cascade
+            # Try EAN cascade (rate limit is inside each attempt)
             resultado = None
             if len(ean) == 13 and ean.isdigit():
                 for buscar_fn in [_buscar_cobasi, buscar_produto_petlove, buscar_produto_amazon,
                                   buscar_produto_mercadolivre, buscar_produto_magalu]:
                     try:
+                        _rate_limit()
                         resultado = buscar_fn(ean)
                         if resultado and resultado.get('imagem_url'):
                             break
                         resultado = None
-                        _rate_limit()
                     except Exception:
                         continue
 
