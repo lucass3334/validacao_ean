@@ -15,14 +15,33 @@ def buscar_produto_por_ean(ean):
 
 def extrair_informacoes_produto(html):
     soup = BeautifulSoup(html, 'html.parser')
-    produto = soup.find('div', class_='MuiGrid-root ProductListItem MuiGrid-item MuiGrid-grid-xs-12 MuiGrid-grid-md-4')
-    if produto:
-        link_produto = produto.find('a')['href']
-        nome_produto = produto.find('h3').text
-        url_completo = f"https://www.cobasi.com.br{link_produto}"
+
+    # VTEX-based selectors (Cobasi migrated to VTEX)
+    # Try finding product link with /p?idsku= or /p/ pattern
+    produto_link = None
+    for a in soup.find_all('a', href=True):
+        href = a['href']
+        if '/p?idsku=' in href or ('/p/' in href and 'cobasi.com.br' not in href):
+            produto_link = a
+            break
+
+    if produto_link:
+        link = produto_link['href']
+        url_completo = f"https://www.cobasi.com.br{link}" if not link.startswith('http') else link
+        h3 = soup.find('h3')
+        nome_produto = h3.text.strip() if h3 else ''
         return nome_produto, url_completo
-    else:
-        return None, None
+
+    # Fallback: old MuiGrid selector
+    produto = soup.find('div', class_=lambda c: c and 'ProductListItem' in c)
+    if produto:
+        a_tag = produto.find('a')
+        if a_tag and a_tag.get('href'):
+            url_completo = f"https://www.cobasi.com.br{a_tag['href']}"
+            nome_produto = produto.find('h3').text.strip() if produto.find('h3') else ''
+            return nome_produto, url_completo
+
+    return None, None
 
 def obter_detalhes_do_produto(url):
     response = requests.get(url)

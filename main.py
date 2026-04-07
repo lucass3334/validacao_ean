@@ -7,6 +7,11 @@ from petz_ean_api import router as petz_ean_router
 from Detalhamento_de_produtos_flowb2b import router as detalhamento_router
 from vinculo_produto_por_fornecedor_flowb2b import router as vinculo_router
 from calculo_pedido_auto_otimizado import router as calculo_router
+from petlove_ean_api import router as petlove_ean_router
+from amazon_ean_api import router as amazon_ean_router
+from mercadolivre_ean_api import router as ml_ean_router
+from magalu_ean_api import router as magalu_ean_router
+from scraper_orquestrador import router as scraper_router
 
 app = FastAPI(
     title="FlowB2B API",
@@ -31,6 +36,11 @@ app.include_router(petz_ean_router, prefix="/petz_ean", tags=["Petz EAN"])
 app.include_router(detalhamento_router, prefix="/detalhamento_de_produtos", tags=["Detalhamento"])
 app.include_router(vinculo_router, prefix="/vinculo_produto_por_fornecedor", tags=["Vínculo Produtos"])
 app.include_router(calculo_router, prefix="/calculo_pedido_auto_otimizado", tags=["Cálculo Pedidos"])
+app.include_router(petlove_ean_router, prefix="/petlove_ean", tags=["Petlove EAN"])
+app.include_router(amazon_ean_router, prefix="/amazon_ean", tags=["Amazon EAN"])
+app.include_router(ml_ean_router, prefix="/ml_ean", tags=["Mercado Livre EAN"])
+app.include_router(magalu_ean_router, prefix="/magalu_ean", tags=["Magalu EAN"])
+app.include_router(scraper_router, prefix="/scraper", tags=["Scraper Orquestrador"])
 
 @app.get("/")
 async def root():
@@ -44,7 +54,13 @@ async def root():
             "detalhamento": "/detalhamento_de_produtos/",
             "vinculo": "/vinculo_produto_por_fornecedor/",
             "calculo_pedido": "/calculo_pedido_auto_otimizado/calcular",
-            "monitoramento_calculo": "/calculo_pedido_auto_otimizado/monitoramento/{fornecedor_id}"
+            "monitoramento_calculo": "/calculo_pedido_auto_otimizado/monitoramento/{fornecedor_id}",
+            "petlove_produto": "/petlove_ean/produto/{ean}",
+            "amazon_produto": "/amazon_ean/produto/{ean}",
+            "ml_produto": "/ml_ean/produto/{ean}",
+            "magalu_produto": "/magalu_ean/produto/{ean}",
+            "scraper_imagem": "/scraper/buscar_imagem",
+            "scraper_batch": "/scraper/buscar_imagens_batch"
         }
     }
 
