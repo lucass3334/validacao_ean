@@ -42,7 +42,16 @@ def _buscar_cobasi(ean: str):
         for img in soup.find_all('img', alt=True):
             src = img.get('src', '') or img.get('data-src', '')
             alt = img.get('alt', '')
-            if src and alt and ('vtexassets.com' in src or 'cobasi.com.br' in src) and 'logo' not in src.lower():
+            if not src or not alt:
+                continue
+            # Must be from vtexassets (product images), not cms/uploads (icons)
+            if 'vtexassets.com' not in src:
+                continue
+            # Reject SVGs, icons, logos
+            if '.svg' in src.lower() or 'icon' in src.lower() or 'logo' in src.lower():
+                continue
+            # Must be a product image (jpg/png/webp)
+            if any(ext in src.lower() for ext in ['.jpg', '.jpeg', '.png', '.webp']):
                 return {'ean': ean, 'nome': alt.strip(), 'imagem_url': src, 'source': 'cobasi'}
     except Exception:
         pass
