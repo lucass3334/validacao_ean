@@ -37,7 +37,8 @@ def _validar_titulo_ia(nome_original: str, titulo_encontrado: str) -> bool:
             },
             json={
                 "model": "gpt-5.4-mini",
-                "max_tokens": 10,
+                "max_completion_tokens": 10,
+                "reasoning": {"effort": "none"},
                 "temperature": 0,
                 "messages": [
                     {
