@@ -227,3 +227,127 @@ async def buscar_imagens_batch(req: BatchRequest, background_tasks: BackgroundTa
     produtos = [{'ean': p.ean, 'nome': p.nome} for p in req.produtos]
     background_tasks.add_task(_processar_batch, produtos, req.webhook_url, req.catalogo_id)
     return {"message": "Processamento iniciado", "total": len(produtos)}
+
+
+# ---------------------------------------------------------------------------
+# Endpoints individuais para testar cada motor separadamente
+# ---------------------------------------------------------------------------
+
+class TestarMotorRequest(BaseModel):
+    ean: str
+    nome: Optional[str] = ""
+
+
+class TestarMotorResponse(BaseModel):
+    success: bool
+    ean: str
+    motor: str
+    image_url: Optional[str] = None
+    titulo: Optional[str] = None
+    confiavel: bool = False
+    error: Optional[str] = None
+    detalhes: Optional[str] = None
+
+
+def _testar_motor(motor_nome: str, buscar_fn, ean: str, nome: str = "", por_nome: bool = False):
+    """Testa um motor individual e retorna resultado detalhado."""
+    try:
+        if por_nome:
+            resultado = buscar_fn(nome, ean)
+        else:
+            resultado = buscar_fn(ean)
+
+        if resultado is None:
+            return TestarMotorResponse(
+                success=False, ean=ean, motor=motor_nome,
+                error=f"{motor_nome}: nenhum produto encontrado para EAN {ean}",
+                detalhes="A busca retornou None. O site pode nao indexar este EAN, ou os seletores CSS estao desatualizados."
+            )
+
+        img = resultado.get('imagem_url')
+        if not img:
+            return TestarMotorResponse(
+                success=False, ean=ean, motor=motor_nome,
+                titulo=resultado.get('nome'),
+                error=f"{motor_nome}: produto encontrado mas sem URL de imagem",
+                detalhes=f"Produto: {resultado.get('nome', '?')}. O seletor de imagem nao encontrou tag <img> valida no HTML."
+            )
+
+        # Validate image URL
+        if '.svg' in img.lower() or 'icon' in img.lower():
+            return TestarMotorResponse(
+                success=False, ean=ean, motor=motor_nome,
+                titulo=resultado.get('nome'),
+                image_url=img,
+                error=f"{motor_nome}: URL retornada e um icone/SVG, nao imagem de produto",
+                detalhes=f"URL: {img}"
+            )
+
+        return TestarMotorResponse(
+            success=True, ean=ean, motor=motor_nome,
+            image_url=img,
+            titulo=resultado.get('nome'),
+            confiavel=resultado.get('ean_correto', not por_nome),
+        )
+
+    except Exception as e:
+        return TestarMotorResponse(
+            success=False, ean=ean, motor=motor_nome,
+            error=f"{motor_nome}: excecao durante busca: {type(e).__name__}",
+            detalhes=str(e)[:200]
+        )
+
+
+@router.post("/testar/cobasi", response_model=TestarMotorResponse)
+async def testar_cobasi(req: TestarMotorRequest):
+    """Testa busca de imagem na Cobasi por EAN."""
+    return _testar_motor("cobasi", _buscar_cobasi, req.ean)
+
+
+@router.post("/testar/petlove", response_model=TestarMotorResponse)
+async def testar_petlove(req: TestarMotorRequest):
+    """Testa busca de imagem na Petlove por EAN."""
+    return _testar_motor("petlove", buscar_produto_petlove, req.ean)
+
+
+@router.post("/testar/amazon", response_model=TestarMotorResponse)
+async def testar_amazon(req: TestarMotorRequest):
+    """Testa busca de imagem na Amazon por EAN."""
+    return _testar_motor("amazon", buscar_produto_amazon, req.ean)
+
+
+@router.post("/testar/mercadolivre", response_model=TestarMotorResponse)
+async def testar_ml(req: TestarMotorRequest):
+    """Testa busca de imagem no Mercado Livre por EAN."""
+    return _testar_motor("mercadolivre", buscar_produto_mercadolivre, req.ean)
+
+
+@router.post("/testar/magalu", response_model=TestarMotorResponse)
+async def testar_magalu(req: TestarMotorRequest):
+    """Testa busca de imagem no Magazine Luiza por EAN."""
+    return _testar_motor("magalu", buscar_produto_magalu, req.ean)
+
+
+@router.post("/testar/petz", response_model=TestarMotorResponse)
+async def testar_petz(req: TestarMotorRequest):
+    """Testa busca de imagem na Petz por NOME (com validacao de EAN)."""
+    if not req.nome:
+        return TestarMotorResponse(
+            success=False, ean=req.ean, motor="petz",
+            error="petz: campo 'nome' obrigatorio (Petz busca por nome, nao EAN)",
+        )
+    return _testar_motor("petz", _buscar_petz, req.ean, req.nome, por_nome=True)
+
+
+@router.post("/testar/todos", response_model=list[TestarMotorResponse])
+async def testar_todos(req: TestarMotorRequest):
+    """Testa todos os 6 motores e retorna resultado de cada um."""
+    resultados = []
+    resultados.append(_testar_motor("cobasi", _buscar_cobasi, req.ean))
+    resultados.append(_testar_motor("petlove", buscar_produto_petlove, req.ean))
+    resultados.append(_testar_motor("amazon", buscar_produto_amazon, req.ean))
+    resultados.append(_testar_motor("mercadolivre", buscar_produto_mercadolivre, req.ean))
+    resultados.append(_testar_motor("magalu", buscar_produto_magalu, req.ean))
+    if req.nome:
+        resultados.append(_testar_motor("petz", _buscar_petz, req.ean, req.nome, por_nome=True))
+    return resultados
