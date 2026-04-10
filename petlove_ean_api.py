@@ -1,46 +1,52 @@
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
-import requests
 from bs4 import BeautifulSoup
+from selenium_helper import fetch_page_html
 
 router = APIRouter()
-
-HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Accept-Language': 'pt-BR,pt;q=0.9',
-}
 
 
 def buscar_produto_petlove(ean: str):
     url = f"https://www.petlove.com.br/busca?q={ean}"
     try:
-        response = requests.get(url, headers=HEADERS, timeout=15)
-        if response.status_code != 200:
+        html = fetch_page_html(url, wait_selector='img[alt]', wait_timeout=8)
+        if not html:
             return None
 
-        soup = BeautifulSoup(response.text, 'html.parser')
+        soup = BeautifulSoup(html, 'html.parser')
 
-        # Petlove product cards contain img with alt text matching the product name
-        imagem_url = None
-        nome = None
-
+        # Petlove product images are in cards with src containing petlove.com.br/images/products
         for img in soup.find_all('img', alt=True):
             src = img.get('src', '') or img.get('data-src', '')
             alt = img.get('alt', '')
-            if src and 'petlove.com.br/images/products' in src and alt:
-                imagem_url = src
-                nome = alt.strip()
-                break
+            if not src or not alt:
+                continue
+            if 'petlove.com.br/images/products' in src or 'petlove.com.br/images' in src:
+                if '.svg' not in src and 'icon' not in src.lower() and 'logo' not in src.lower():
+                    return {
+                        'ean': ean,
+                        'nome': alt.strip(),
+                        'imagem_url': src,
+                        'source': 'petlove',
+                    }
 
-        if not imagem_url:
-            return None
+        # Fallback: any product-like image with meaningful alt text
+        for img in soup.find_all('img', alt=True):
+            src = img.get('src', '') or img.get('data-src', '')
+            alt = img.get('alt', '')
+            if not src or not alt or len(alt) < 10:
+                continue
+            if '.svg' in src or 'icon' in src.lower() or 'logo' in src.lower() or 'banner' in src.lower():
+                continue
+            if src.startswith('http') and ('jpg' in src or 'jpeg' in src or 'png' in src or 'webp' in src):
+                return {
+                    'ean': ean,
+                    'nome': alt.strip(),
+                    'imagem_url': src,
+                    'source': 'petlove',
+                }
 
-        return {
-            'ean': ean,
-            'nome': nome,
-            'imagem_url': imagem_url,
-            'source': 'petlove',
-        }
+        return None
     except Exception:
         return None
 

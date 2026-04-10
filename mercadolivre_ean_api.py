@@ -24,31 +24,49 @@ def buscar_produto_mercadolivre(ean: str):
 
         soup = BeautifulSoup(response.text, 'html.parser')
 
-        # ML product images use D_NQ_NP pattern (not banners which use D_NQ_8)
-        imagem_url = None
-        nome = None
+        # Strategy 1: Find product cards (poly-card or ui-search-layout__item)
+        # and extract the first product image + title from within
+        cards = soup.select('.ui-search-layout__item, .poly-card, [class*="ui-search-result"]')
+        for card in cards:
+            # Get title from h2/h3 inside the card
+            title_el = card.select_one('h2, h3, [class*="title"]')
+            title = title_el.get_text(strip=True) if title_el else None
 
-        for img in soup.find_all('img'):
-            src = img.get('src', '') or img.get('data-src', '')
-            if 'mlstatic.com/D_NQ_NP' in src or 'mlstatic.com/D_Q_NP' in src:
-                imagem_url = src
-                nome = img.get('alt', '').strip()
-                if nome and 'Imagen' not in nome:
+            # Get product image (D_NQ_NP = product, not D_NQ_8 = banner)
+            img = None
+            for img_tag in card.find_all('img'):
+                src = img_tag.get('src', '') or img_tag.get('data-src', '')
+                if 'mlstatic.com/D_' in src and '.svg' not in src:
+                    img = src
+                    if not title:
+                        title = img_tag.get('alt', '').strip()
                     break
-                # Clean alt text that contains " Imagen - 1/2" suffix
-                if nome:
-                    nome = nome.split(' Imagen')[0].strip()
-                break
 
-        if not imagem_url:
-            return None
+            if img and title:
+                # Clean "Imagen - 1/2" suffix from alt text
+                if 'Imagen' in title:
+                    title = title.split('Imagen')[0].strip()
+                return {
+                    'ean': ean,
+                    'nome': title,
+                    'imagem_url': img,
+                    'source': 'mercadolivre',
+                }
 
-        return {
-            'ean': ean,
-            'nome': nome,
-            'imagem_url': imagem_url,
-            'source': 'mercadolivre',
-        }
+        # Strategy 2: fallback - find first img with D_NQ_NP pattern AND a nearby h2
+        for img_tag in soup.find_all('img'):
+            src = img_tag.get('src', '') or img_tag.get('data-src', '')
+            if 'mlstatic.com/D_NQ_NP' in src and '.svg' not in src:
+                alt = img_tag.get('alt', '').strip()
+                if alt and 'Imagen' not in alt and len(alt) > 10:
+                    return {
+                        'ean': ean,
+                        'nome': alt,
+                        'imagem_url': src,
+                        'source': 'mercadolivre',
+                    }
+
+        return None
     except Exception:
         return None
 

@@ -1,30 +1,21 @@
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
-import requests
 from bs4 import BeautifulSoup
+from selenium_helper import fetch_page_html
 
 router = APIRouter()
-
-HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Accept-Language': 'pt-BR,pt;q=0.9',
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-}
 
 
 def buscar_produto_magalu(ean: str):
     url = f"https://www.magazineluiza.com.br/busca/{ean}"
     try:
-        response = requests.get(url, headers=HEADERS, timeout=15)
-        if response.status_code != 200:
+        html = fetch_page_html(url, wait_selector='a[href*="/p/"] img', wait_timeout=8)
+        if not html:
             return None
 
-        soup = BeautifulSoup(response.text, 'html.parser')
+        soup = BeautifulSoup(html, 'html.parser')
 
         # Magalu product cards: img inside a[href*="/p/"]
-        imagem_url = None
-        nome = None
-
         for a_tag in soup.find_all('a', href=True):
             if '/p/' not in a_tag['href']:
                 continue
@@ -33,20 +24,31 @@ def buscar_produto_magalu(ean: str):
             if img:
                 src = img.get('src', '') or img.get('data-src', '')
                 alt = img.get('alt', '').strip()
-                if src and alt and 'svg' not in src:
-                    imagem_url = src
-                    nome = alt
-                    break
+                if src and alt and '.svg' not in src and 'icon' not in src.lower():
+                    return {
+                        'ean': ean,
+                        'nome': alt,
+                        'imagem_url': src,
+                        'source': 'magalu',
+                    }
 
-        if not imagem_url:
-            return None
+        # Fallback: any product image with meaningful alt
+        for img in soup.find_all('img', alt=True):
+            src = img.get('src', '') or img.get('data-src', '')
+            alt = img.get('alt', '').strip()
+            if not src or not alt or len(alt) < 10:
+                continue
+            if '.svg' in src or 'icon' in src.lower() or 'logo' in src.lower() or 'banner' in src.lower():
+                continue
+            if ('mlcdn' in src or 'magazineluiza' in src) and src.startswith('http'):
+                return {
+                    'ean': ean,
+                    'nome': alt,
+                    'imagem_url': src,
+                    'source': 'magalu',
+                }
 
-        return {
-            'ean': ean,
-            'nome': nome,
-            'imagem_url': imagem_url,
-            'source': 'magalu',
-        }
+        return None
     except Exception:
         return None
 
