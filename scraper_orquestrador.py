@@ -36,7 +36,7 @@ def _validar_titulo_ia(nome_original: str, titulo_encontrado: str) -> bool:
                 "Content-Type": "application/json",
             },
             json={
-                "model": "gpt-4o-mini",
+                "model": "gpt-5.4-mini",
                 "max_tokens": 10,
                 "temperature": 0,
                 "messages": [
