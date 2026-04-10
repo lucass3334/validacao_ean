@@ -4,11 +4,8 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from webdriver_manager.chrome import ChromeDriverManager
-
-
 def get_chrome_driver():
-    """Creates a headless Chrome driver with auto-matched ChromeDriver version."""
+    """Creates a headless Chrome driver. ChromeDriver version matched in Dockerfile."""
     options = Options()
     options.add_argument("--headless")
     options.add_argument("--no-sandbox")
@@ -19,13 +16,7 @@ def get_chrome_driver():
     options.add_argument("--window-size=1920,1080")
     options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 
-    try:
-        # Try system chromedriver first
-        driver = webdriver.Chrome(service=Service("/usr/local/bin/chromedriver"), options=options)
-    except Exception:
-        # Fallback: auto-download matching chromedriver
-        driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
-
+    driver = webdriver.Chrome(service=Service("/usr/local/bin/chromedriver"), options=options)
     driver.set_page_load_timeout(20)
     return driver
 
