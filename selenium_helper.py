@@ -17,7 +17,7 @@ def get_chrome_driver():
     options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 
     driver = webdriver.Chrome(service=Service("/usr/local/bin/chromedriver"), options=options)
-    driver.set_page_load_timeout(20)
+    driver.set_page_load_timeout(30)
     return driver
 
 

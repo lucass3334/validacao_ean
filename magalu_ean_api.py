@@ -9,22 +9,22 @@ router = APIRouter()
 def buscar_produto_magalu(ean: str):
     url = f"https://www.magazineluiza.com.br/busca/{ean}"
     try:
-        html = fetch_page_html(url, wait_selector='a[href*="/p/"] img', wait_timeout=8)
+        # Magalu is heavy SPA, needs more time to load
+        html = fetch_page_html(url, wait_selector='img[alt]', wait_timeout=15)
         if not html:
             return None
 
         soup = BeautifulSoup(html, 'html.parser')
 
-        # Magalu product cards: img inside a[href*="/p/"]
+        # Strategy 1: product cards with /p/ links
         for a_tag in soup.find_all('a', href=True):
             if '/p/' not in a_tag['href']:
                 continue
-
             img = a_tag.find('img', alt=True)
             if img:
                 src = img.get('src', '') or img.get('data-src', '')
                 alt = img.get('alt', '').strip()
-                if src and alt and '.svg' not in src and 'icon' not in src.lower():
+                if src and alt and '.svg' not in src and 'icon' not in src.lower() and len(alt) > 5:
                     return {
                         'ean': ean,
                         'nome': alt,
@@ -32,7 +32,7 @@ def buscar_produto_magalu(ean: str):
                         'source': 'magalu',
                     }
 
-        # Fallback: any product image with meaningful alt
+        # Strategy 2: any product image with mlcdn or magazineluiza domain
         for img in soup.find_all('img', alt=True):
             src = img.get('src', '') or img.get('data-src', '')
             alt = img.get('alt', '').strip()
