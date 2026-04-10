@@ -3,6 +3,8 @@ from pydantic import BaseModel
 from typing import Optional
 import time
 import random
+import os
+import json
 import requests as http_requests
 
 from cobasi_ean_api import buscar_produto_por_ean as cobasi_buscar_html, extrair_informacoes_produto as cobasi_extrair
@@ -12,6 +14,72 @@ from mercadolivre_ean_api import buscar_produto_mercadolivre
 from magalu_ean_api import buscar_produto_magalu
 
 router = APIRouter()
+
+# ---------------------------------------------------------------------------
+# IA validation: compare product name vs scraped title
+# ---------------------------------------------------------------------------
+
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+
+
+def _validar_titulo_ia(nome_original: str, titulo_encontrado: str) -> bool:
+    """Usa IA para validar se o titulo encontrado corresponde ao produto original."""
+    if not OPENAI_API_KEY or not titulo_encontrado:
+        # Fallback: simple keyword matching
+        return _validar_titulo_simples(nome_original, titulo_encontrado)
+
+    try:
+        resp = http_requests.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {OPENAI_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": "gpt-4o-mini",
+                "max_tokens": 10,
+                "temperature": 0,
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": "Voce valida se dois nomes de produto se referem ao MESMO produto. Responda APENAS 'sim' ou 'nao'. Considere que abreviacoes, ordem diferente de palavras, e marcas equivalentes sao aceitas. Mas produtos completamente diferentes (ex: racao vs tela de celular) devem ser 'nao'."
+                    },
+                    {
+                        "role": "user",
+                        "content": f"Produto original: {nome_original}\nProduto encontrado: {titulo_encontrado}\n\nSao o mesmo produto?"
+                    }
+                ]
+            },
+            timeout=10,
+        )
+        if resp.status_code == 200:
+            answer = resp.json()["choices"][0]["message"]["content"].strip().lower()
+            return answer.startswith("sim")
+    except Exception:
+        pass
+
+    return _validar_titulo_simples(nome_original, titulo_encontrado)
+
+
+def _validar_titulo_simples(nome_original: str, titulo_encontrado: str) -> bool:
+    """Fallback: validacao por palavras-chave em comum."""
+    if not titulo_encontrado:
+        return False
+
+    nome_lower = nome_original.lower()
+    titulo_lower = titulo_encontrado.lower()
+
+    # Palavras significativas do nome original (>3 chars, sem preposicoes)
+    stopwords = {'para', 'com', 'cães', 'caes', 'gato', 'gatos', 'adulto', 'adultos', 'filhote', 'filhotes', 'porte', 'sabor'}
+    palavras = [p for p in nome_lower.split() if len(p) > 3 and p not in stopwords]
+
+    if not palavras:
+        return False
+
+    matches = sum(1 for p in palavras if p in titulo_lower)
+    ratio = matches / len(palavras)
+
+    return ratio >= 0.4
 
 # Rate limiting globals
 _request_count = 0
@@ -118,12 +186,12 @@ async def buscar_imagem(req: BuscarImagemRequest):
     ean_valido = len(ean) == 13 and ean.isdigit()
 
     if ean_valido:
-        # Cascade by EAN: Cobasi → Petlove → Amazon → ML → Magalu
+        # Cascade by EAN: Cobasi → Amazon → ML → Petlove → Magalu
         sites_ean = [
             ("cobasi", _buscar_cobasi),
-            ("petlove", buscar_produto_petlove),
             ("amazon", buscar_produto_amazon),
             ("mercadolivre", buscar_produto_mercadolivre),
+            ("petlove", buscar_produto_petlove),
             ("magalu", buscar_produto_magalu),
         ]
 
@@ -132,12 +200,20 @@ async def buscar_imagem(req: BuscarImagemRequest):
                 _rate_limit()
                 resultado = buscar_fn(ean)
                 if resultado and resultado.get('imagem_url'):
+                    titulo = resultado.get('nome', '')
+
+                    # Validate: IA checks if scraped title matches original product
+                    if titulo and nome:
+                        is_match = _validar_titulo_ia(nome, titulo)
+                        if not is_match:
+                            continue  # Title doesn't match, try next site
+
                     return BuscarImagemResponse(
                         success=True,
                         ean=ean,
                         image_url=resultado['imagem_url'],
                         source=resultado.get('source', source_name),
-                        titulo=resultado.get('nome'),
+                        titulo=titulo,
                         confiavel=True,
                     )
             except Exception:
@@ -245,6 +321,7 @@ class TestarMotorResponse(BaseModel):
     image_url: Optional[str] = None
     titulo: Optional[str] = None
     confiavel: bool = False
+    validacao_ia: Optional[str] = None  # 'aprovado', 'reprovado', 'sem_validacao'
     error: Optional[str] = None
     detalhes: Optional[str] = None
 
@@ -283,11 +360,33 @@ def _testar_motor(motor_nome: str, buscar_fn, ean: str, nome: str = "", por_nome
                 detalhes=f"URL: {img}"
             )
 
+        # IA validation: compare product name vs scraped title
+        titulo = resultado.get('nome', '')
+        validacao = 'sem_validacao'
+        is_valid = True
+
+        if titulo and nome:
+            is_match = _validar_titulo_ia(nome, titulo)
+            validacao = 'aprovado' if is_match else 'reprovado'
+            is_valid = is_match
+
+        if not is_valid:
+            return TestarMotorResponse(
+                success=False, ean=ean, motor=motor_nome,
+                image_url=img,
+                titulo=titulo,
+                confiavel=False,
+                validacao_ia='reprovado',
+                error=f"{motor_nome}: IA reprovou — titulo nao corresponde ao produto",
+                detalhes=f"Original: '{nome}' | Encontrado: '{titulo}'"
+            )
+
         return TestarMotorResponse(
             success=True, ean=ean, motor=motor_nome,
             image_url=img,
-            titulo=resultado.get('nome'),
+            titulo=titulo,
             confiavel=resultado.get('ean_correto', not por_nome),
+            validacao_ia=validacao,
         )
 
     except Exception as e:
@@ -300,32 +399,32 @@ def _testar_motor(motor_nome: str, buscar_fn, ean: str, nome: str = "", por_nome
 
 @router.post("/testar/cobasi", response_model=TestarMotorResponse)
 async def testar_cobasi(req: TestarMotorRequest):
-    """Testa busca de imagem na Cobasi por EAN."""
-    return _testar_motor("cobasi", _buscar_cobasi, req.ean)
+    """Testa busca de imagem na Cobasi por EAN. Passe 'nome' para validacao IA."""
+    return _testar_motor("cobasi", _buscar_cobasi, req.ean, req.nome or "")
 
 
 @router.post("/testar/petlove", response_model=TestarMotorResponse)
 async def testar_petlove(req: TestarMotorRequest):
-    """Testa busca de imagem na Petlove por EAN."""
-    return _testar_motor("petlove", buscar_produto_petlove, req.ean)
+    """Testa busca de imagem na Petlove por EAN. Passe 'nome' para validacao IA."""
+    return _testar_motor("petlove", buscar_produto_petlove, req.ean, req.nome or "")
 
 
 @router.post("/testar/amazon", response_model=TestarMotorResponse)
 async def testar_amazon(req: TestarMotorRequest):
-    """Testa busca de imagem na Amazon por EAN."""
-    return _testar_motor("amazon", buscar_produto_amazon, req.ean)
+    """Testa busca de imagem na Amazon por EAN. Passe 'nome' para validacao IA."""
+    return _testar_motor("amazon", buscar_produto_amazon, req.ean, req.nome or "")
 
 
 @router.post("/testar/mercadolivre", response_model=TestarMotorResponse)
 async def testar_ml(req: TestarMotorRequest):
-    """Testa busca de imagem no Mercado Livre por EAN."""
-    return _testar_motor("mercadolivre", buscar_produto_mercadolivre, req.ean)
+    """Testa busca de imagem no Mercado Livre por EAN. Passe 'nome' para validacao IA."""
+    return _testar_motor("mercadolivre", buscar_produto_mercadolivre, req.ean, req.nome or "")
 
 
 @router.post("/testar/magalu", response_model=TestarMotorResponse)
 async def testar_magalu(req: TestarMotorRequest):
-    """Testa busca de imagem no Magazine Luiza por EAN."""
-    return _testar_motor("magalu", buscar_produto_magalu, req.ean)
+    """Testa busca de imagem no Magazine Luiza por EAN. Passe 'nome' para validacao IA."""
+    return _testar_motor("magalu", buscar_produto_magalu, req.ean, req.nome or "")
 
 
 @router.post("/testar/petz", response_model=TestarMotorResponse)
