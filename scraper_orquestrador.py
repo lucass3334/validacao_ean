@@ -17,6 +17,7 @@ from petlove_ean_api import buscar_produto_petlove
 from amazon_ean_api import buscar_produto_amazon
 from mercadolivre_ean_api import buscar_produto_mercadolivre
 from magalu_ean_api import buscar_produto_magalu
+from bing_images_api import buscar_candidatos_bing
 
 router = APIRouter()
 
@@ -249,6 +250,59 @@ def _tentar_site(source_name: str, buscar_fn, ean: str, nome: str, por_nome: boo
         return None
 
 
+def _tentar_bing_com_validacao(nome: str, ean: str) -> Optional[dict]:
+    """
+    Tier 3 fallback: busca multiplos candidatos no Bing Images e
+    valida cada um com IA. Retorna o primeiro que a IA aprovar.
+    Usa timeout de 20s na busca inicial.
+    """
+    start = time.time()
+    logger.info(f"[BUSCA] start bing ean={ean} query='{nome[:60]}'")
+    try:
+        with ThreadPoolExecutor(max_workers=1) as ex:
+            future = ex.submit(lambda: buscar_candidatos_bing(nome, ean, limite=10))
+            try:
+                candidatos = future.result(timeout=SITE_TIMEOUT_S)
+            except FuturesTimeout:
+                logger.warning(f"[BUSCA] bing TIMEOUT apos {SITE_TIMEOUT_S}s ean={ean}")
+                return None
+
+        elapsed = round(time.time() - start, 1)
+        if not candidatos:
+            logger.info(f"[BUSCA] bing sem resultados em {elapsed}s ean={ean}")
+            return None
+
+        logger.info(f"[BUSCA] bing retornou {len(candidatos)} candidatos em {elapsed}s, validando com IA...")
+
+        for i, cand in enumerate(candidatos):
+            titulo = cand.get('nome', '')
+            if not titulo:
+                continue
+            is_match = _validar_titulo_ia(nome, titulo)
+            if is_match:
+                total_elapsed = round(time.time() - start, 1)
+                logger.info(
+                    f"[BUSCA] bing IA APROVOU candidato #{i+1} em {total_elapsed}s "
+                    f"ean={ean} titulo='{titulo[:60]}' purl={cand.get('purl', '')[:60]}"
+                )
+                return {
+                    'imagem_url': cand['imagem_url'],
+                    'source': 'bing',
+                    'titulo': titulo,
+                    'confiavel': False,  # Bing eh fallback, menos confiavel
+                }
+            else:
+                logger.info(f"[BUSCA] bing IA reprovou candidato #{i+1} titulo='{titulo[:60]}'")
+
+        total_elapsed = round(time.time() - start, 1)
+        logger.info(f"[BUSCA] bing todos {len(candidatos)} candidatos reprovados pela IA em {total_elapsed}s ean={ean}")
+        return None
+    except Exception as e:
+        elapsed = round(time.time() - start, 1)
+        logger.warning(f"[BUSCA] bing EXCECAO em {elapsed}s ean={ean}: {type(e).__name__}: {str(e)[:100]}")
+        return None
+
+
 @router.post("/buscar_imagem", response_model=BuscarImagemResponse)
 async def buscar_imagem(req: BuscarImagemRequest):
     ean = req.ean.strip()
@@ -277,13 +331,30 @@ async def buscar_imagem(req: BuscarImagemRequest):
     if nome:
         tier2.append(("petz", _buscar_petz, True))
 
-    # Cascade: T1 -> T2, primeiro que valida ganha
+    # Cascade T1 -> T2, primeiro que valida ganha
     for source_name, buscar_fn, por_nome in tier1 + tier2:
         _rate_limit()
         resultado = _tentar_site(source_name, buscar_fn, ean, nome, por_nome=por_nome)
         if resultado:
             total_elapsed = round(time.time() - overall_start, 1)
             logger.info(f"[BUSCA] === FIM SUCCESS source={source_name} total={total_elapsed}s ean={ean} ===")
+            return BuscarImagemResponse(
+                success=True,
+                ean=ean,
+                image_url=resultado['imagem_url'],
+                source=resultado['source'],
+                titulo=resultado['titulo'],
+                confiavel=resultado['confiavel'],
+            )
+
+    # Tier 3: Bing Images como ultimo recurso (apenas se nome existe)
+    # Busca ate 10 candidatos e valida cada um com IA, retorna primeiro aprovado
+    if nome:
+        _rate_limit()
+        resultado = _tentar_bing_com_validacao(nome, ean)
+        if resultado:
+            total_elapsed = round(time.time() - overall_start, 1)
+            logger.info(f"[BUSCA] === FIM SUCCESS source=bing total={total_elapsed}s ean={ean} ===")
             return BuscarImagemResponse(
                 success=True,
                 ean=ean,
