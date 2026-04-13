@@ -5,7 +5,12 @@ import time
 import random
 import os
 import json
+import logging
 import requests as http_requests
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
+
+logger = logging.getLogger("scraper_orquestrador")
+SITE_TIMEOUT_S = 20  # Hard timeout per site
 
 from cobasi_ean_api import buscar_produto_por_ean as cobasi_buscar_html, extrair_informacoes_produto as cobasi_extrair
 from petlove_ean_api import buscar_produto_petlove
@@ -178,64 +183,113 @@ class BatchRequest(BaseModel):
     catalogo_id: Optional[int] = None
 
 
+def _tentar_site(source_name: str, buscar_fn, ean: str, nome: str, por_nome: bool = False) -> Optional[dict]:
+    """
+    Tenta um motor com timeout hard. Retorna dict {imagem_url, source, titulo, confiavel}
+    se achou+IA-aprovou, ou None caso contrario.
+    Loga inicio, tempo e resultado de cada tentativa.
+    """
+    start = time.time()
+    logger.info(f"[BUSCA] start {source_name} ean={ean}")
+    try:
+        with ThreadPoolExecutor(max_workers=1) as ex:
+            future = ex.submit((lambda: buscar_fn(nome, ean)) if por_nome else (lambda: buscar_fn(ean)))
+            try:
+                resultado = future.result(timeout=SITE_TIMEOUT_S)
+            except FuturesTimeout:
+                logger.warning(f"[BUSCA] {source_name} TIMEOUT apos {SITE_TIMEOUT_S}s ean={ean}")
+                return None
+
+        elapsed = round(time.time() - start, 1)
+
+        if not resultado or not resultado.get('imagem_url'):
+            logger.info(f"[BUSCA] {source_name} sem imagem em {elapsed}s ean={ean}")
+            return None
+
+        img = resultado['imagem_url']
+        img_lower = img.lower().split('?')[0]  # strip query string before extension check
+
+        # Whitelist: aceitar somente jpg/jpeg/png/webp
+        formatos_aceitos = ('.jpg', '.jpeg', '.png', '.webp')
+        if not any(img_lower.endswith(ext) for ext in formatos_aceitos):
+            logger.info(f"[BUSCA] {source_name} formato nao suportado em {elapsed}s ean={ean} url={img[:80]}")
+            return None
+
+        # Anti-icone: rejeita explicitamente
+        if 'icon' in img_lower or 'logo' in img_lower or '/sprite' in img_lower:
+            logger.info(f"[BUSCA] {source_name} icone/logo descartado em {elapsed}s ean={ean}")
+            return None
+
+        titulo = resultado.get('nome', '') or ''
+
+        # IA validation: only if both names exist
+        if titulo and nome:
+            is_match = _validar_titulo_ia(nome, titulo)
+            if not is_match:
+                logger.info(f"[BUSCA] {source_name} IA reprovou em {elapsed}s ean={ean} titulo='{titulo[:60]}'")
+                return None
+            logger.info(f"[BUSCA] {source_name} IA APROVOU em {elapsed}s ean={ean}")
+        else:
+            logger.info(f"[BUSCA] {source_name} sem validacao IA em {elapsed}s ean={ean}")
+
+        return {
+            'imagem_url': img,
+            'source': resultado.get('source', source_name),
+            'titulo': titulo,
+            'confiavel': True if not por_nome else resultado.get('ean_correto', False),
+        }
+    except Exception as e:
+        elapsed = round(time.time() - start, 1)
+        logger.warning(f"[BUSCA] {source_name} EXCECAO em {elapsed}s ean={ean}: {type(e).__name__}: {str(e)[:100]}")
+        return None
+
+
 @router.post("/buscar_imagem", response_model=BuscarImagemResponse)
 async def buscar_imagem(req: BuscarImagemRequest):
     ean = req.ean.strip()
     nome = req.nome.strip()
 
-    # Validate EAN
     ean_valido = len(ean) == 13 and ean.isdigit()
+    overall_start = time.time()
+    logger.info(f"[BUSCA] === inicio ean={ean} nome='{nome[:50]}' ===")
 
+    # Tier 1: rapidos (HTTP, sem Selenium)
+    tier1 = []
     if ean_valido:
-        # Cascade by EAN: Cobasi → Amazon → ML → Petlove → Magalu
-        sites_ean = [
-            ("cobasi", _buscar_cobasi),
-            ("amazon", buscar_produto_amazon),
-            ("mercadolivre", buscar_produto_mercadolivre),
-            ("petlove", buscar_produto_petlove),
-            ("magalu", buscar_produto_magalu),
+        tier1 = [
+            ("cobasi", _buscar_cobasi, False),
+            ("amazon", buscar_produto_amazon, False),
+            ("mercadolivre", buscar_produto_mercadolivre, False),
         ]
 
-        for source_name, buscar_fn in sites_ean:
-            try:
-                _rate_limit()
-                resultado = buscar_fn(ean)
-                if resultado and resultado.get('imagem_url'):
-                    titulo = resultado.get('nome', '')
+    # Tier 2: lentos (Selenium)
+    tier2 = []
+    if ean_valido:
+        tier2 = [
+            ("petlove", buscar_produto_petlove, False),
+            ("magalu", buscar_produto_magalu, False),
+        ]
+    if nome:
+        tier2.append(("petz", _buscar_petz, True))
 
-                    # Validate: IA checks if scraped title matches original product
-                    if titulo and nome:
-                        is_match = _validar_titulo_ia(nome, titulo)
-                        if not is_match:
-                            continue  # Title doesn't match, try next site
-
-                    return BuscarImagemResponse(
-                        success=True,
-                        ean=ean,
-                        image_url=resultado['imagem_url'],
-                        source=resultado.get('source', source_name),
-                        titulo=titulo,
-                        confiavel=True,
-                    )
-            except Exception:
-                continue
-
-    # Fallback: Petz by name (with EAN validation)
-    try:
+    # Cascade: T1 -> T2, primeiro que valida ganha
+    for source_name, buscar_fn, por_nome in tier1 + tier2:
         _rate_limit()
-        resultado = _buscar_petz(nome, ean)
-        if resultado and resultado.get('imagem_url'):
+        resultado = _tentar_site(source_name, buscar_fn, ean, nome, por_nome=por_nome)
+        if resultado:
+            total_elapsed = round(time.time() - overall_start, 1)
+            logger.info(f"[BUSCA] === FIM SUCCESS source={source_name} total={total_elapsed}s ean={ean} ===")
             return BuscarImagemResponse(
                 success=True,
                 ean=ean,
                 image_url=resultado['imagem_url'],
-                source='petz',
-                titulo=resultado.get('nome'),
-                confiavel=resultado.get('ean_correto', False),
+                source=resultado['source'],
+                titulo=resultado['titulo'],
+                confiavel=resultado['confiavel'],
             )
-    except Exception:
-        pass
 
+    total_elapsed = round(time.time() - overall_start, 1)
+    logger.info(f"[BUSCA] === FIM NOT_FOUND total={total_elapsed}s ean={ean} ===")
     return BuscarImagemResponse(
         success=False,
         ean=ean,
