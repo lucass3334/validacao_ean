@@ -1,53 +1,51 @@
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
-from bs4 import BeautifulSoup
-from selenium_helper import fetch_page_html
+import re
+import requests
 
 router = APIRouter()
 
+HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Accept-Language': 'pt-BR,pt;q=0.9',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+}
+
+# Padrao JSON embedded no HTML: "name":"..." ... "image":"https://a-static.mlcdn.com.br/.../.jpg"
+_PATTERN_NAME_IMAGE = re.compile(
+    r'"name":"([^"]{10,200})"[^}]{0,500}?"image":"(https://a-static\.mlcdn\.com\.br[^"]+\.jpe?g)"'
+)
+
 
 def buscar_produto_magalu(ean: str):
+    """
+    Busca produto no Magalu via HTML estatico.
+    Os produtos sao embedded no HTML como JSON pelo Next.js do magazineluiza.com.br.
+    Nao precisa Selenium.
+    """
     url = f"https://www.magazineluiza.com.br/busca/{ean}"
     try:
-        # Magalu is heavy SPA, needs more time to load
-        html = fetch_page_html(url, wait_selector='img[alt]', wait_timeout=15)
-        if not html:
+        r = requests.get(url, headers=HEADERS, timeout=10)
+        if r.status_code != 200:
             return None
 
-        soup = BeautifulSoup(html, 'html.parser')
+        # Busca pares nome+imagem no JSON embedded
+        matches = _PATTERN_NAME_IMAGE.findall(r.text)
+        if not matches:
+            return None
 
-        # Strategy 1: product cards with /p/ links
-        for a_tag in soup.find_all('a', href=True):
-            if '/p/' not in a_tag['href']:
+        # Primeiro match e o primeiro resultado da busca
+        for nome, img in matches:
+            if not img or 'icon' in img.lower() or 'logo' in img.lower():
                 continue
-            img = a_tag.find('img', alt=True)
-            if img:
-                src = img.get('src', '') or img.get('data-src', '')
-                alt = img.get('alt', '').strip()
-                if src and alt and '.svg' not in src and 'icon' not in src.lower() and len(alt) > 5:
-                    return {
-                        'ean': ean,
-                        'nome': alt,
-                        'imagem_url': src,
-                        'source': 'magalu',
-                    }
-
-        # Strategy 2: any product image with mlcdn or magazineluiza domain
-        for img in soup.find_all('img', alt=True):
-            src = img.get('src', '') or img.get('data-src', '')
-            alt = img.get('alt', '').strip()
-            if not src or not alt or len(alt) < 10:
-                continue
-            if '.svg' in src or 'icon' in src.lower() or 'logo' in src.lower() or 'banner' in src.lower():
-                continue
-            if ('mlcdn' in src or 'magazineluiza' in src) and src.startswith('http'):
-                return {
-                    'ean': ean,
-                    'nome': alt,
-                    'imagem_url': src,
-                    'source': 'magalu',
-                }
-
+            # Upgrade resolucao: 186x140 -> 1500x1500 (Magalu aceita qualquer)
+            img_hi = img.replace('/186x140/', '/1500x1500/').replace('/280x210/', '/1500x1500/')
+            return {
+                'ean': ean,
+                'nome': nome.strip(),
+                'imagem_url': img_hi,
+                'source': 'magalu',
+            }
         return None
     except Exception:
         return None
@@ -63,5 +61,4 @@ async def buscar_produto(ean: str):
             'Link da Imagem': resultado['imagem_url'],
             'Fonte': 'Magazine Luiza',
         }
-    else:
-        return JSONResponse(status_code=404, content={"Erro": "Produto nao encontrado no Magazine Luiza"})
+    return JSONResponse(status_code=404, content={"Erro": "Produto nao encontrado no Magazine Luiza"})

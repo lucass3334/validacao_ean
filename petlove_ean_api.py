@@ -7,6 +7,10 @@ router = APIRouter()
 
 
 def buscar_produto_petlove(ean: str):
+    """
+    Busca produto na Petlove. Requer Selenium (site tem anti-bot em requests diretos).
+    Filtra apenas imagens em /images/products/ pra evitar pegar banners, logos, selos e payment methods.
+    """
     url = f"https://www.petlove.com.br/busca?q={ean}"
     try:
         html = fetch_page_html(url, wait_selector='img[alt]', wait_timeout=8)
@@ -15,36 +19,29 @@ def buscar_produto_petlove(ean: str):
 
         soup = BeautifulSoup(html, 'html.parser')
 
-        # Petlove product images are in cards with src containing petlove.com.br/images/products
+        # Petlove: imagens de produto tem src no formato
+        # https://www.petlove.com.br/images/products/{id}/{size}/{ean}.png
+        # Filtro estrito pra /images/products/ (com barra) evita /static/uploads/images/payment/methods.png
         for img in soup.find_all('img', alt=True):
             src = img.get('src', '') or img.get('data-src', '')
-            alt = img.get('alt', '')
+            alt = img.get('alt', '').strip()
             if not src or not alt:
                 continue
-            if 'petlove.com.br/images/products' in src or 'petlove.com.br/images' in src:
-                if '.svg' not in src and 'icon' not in src.lower() and 'logo' not in src.lower():
-                    return {
-                        'ean': ean,
-                        'nome': alt.strip(),
-                        'imagem_url': src,
-                        'source': 'petlove',
-                    }
-
-        # Fallback: any product-like image with meaningful alt text
-        for img in soup.find_all('img', alt=True):
-            src = img.get('src', '') or img.get('data-src', '')
-            alt = img.get('alt', '')
-            if not src or not alt or len(alt) < 10:
+            if '/images/products/' not in src:
                 continue
-            if '.svg' in src or 'icon' in src.lower() or 'logo' in src.lower() or 'banner' in src.lower():
+            # Whitelist: jpg/jpeg/png/webp apenas
+            src_lower = src.lower().split('?')[0]
+            if not any(src_lower.endswith(ext) for ext in ('.jpg', '.jpeg', '.png', '.webp')):
                 continue
-            if src.startswith('http') and ('jpg' in src or 'jpeg' in src or 'png' in src or 'webp' in src):
-                return {
-                    'ean': ean,
-                    'nome': alt.strip(),
-                    'imagem_url': src,
-                    'source': 'petlove',
-                }
+            # Exige alt significativo (nome de produto, nao label generica)
+            if len(alt) < 15:
+                continue
+            return {
+                'ean': ean,
+                'nome': alt,
+                'imagem_url': src,
+                'source': 'petlove',
+            }
 
         return None
     except Exception:

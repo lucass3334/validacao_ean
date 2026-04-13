@@ -93,6 +93,11 @@ _last_reset = time.time()
 
 
 def _rate_limit():
+    """
+    Rate limit curto entre tentativas de sites diferentes no MESMO produto.
+    100 requests por minuto maximo (pausa de 60s se atingir o limite).
+    Entre requests: 0.3-0.8s (suficiente pra nao ser bloqueado).
+    """
     global _request_count, _last_reset
     if _request_count >= 100:
         elapsed = time.time() - _last_reset
@@ -100,7 +105,7 @@ def _rate_limit():
             time.sleep(60 - elapsed)
         _request_count = 0
         _last_reset = time.time()
-    time.sleep(random.uniform(3, 10))
+    time.sleep(random.uniform(0.3, 0.8))
     _request_count += 1
 
 
@@ -253,21 +258,21 @@ async def buscar_imagem(req: BuscarImagemRequest):
     overall_start = time.time()
     logger.info(f"[BUSCA] === inicio ean={ean} nome='{nome[:50]}' ===")
 
-    # Tier 1: rapidos (HTTP, sem Selenium)
+    # Tier 1: rapidos (HTTP, sem Selenium) - sub 3s em caso tipico
     tier1 = []
     if ean_valido:
         tier1 = [
             ("cobasi", _buscar_cobasi, False),
             ("amazon", buscar_produto_amazon, False),
             ("mercadolivre", buscar_produto_mercadolivre, False),
+            ("magalu", buscar_produto_magalu, False),
         ]
 
-    # Tier 2: lentos (Selenium)
+    # Tier 2: lentos (Selenium) - so se Tier 1 falhou
     tier2 = []
     if ean_valido:
         tier2 = [
             ("petlove", buscar_produto_petlove, False),
-            ("magalu", buscar_produto_magalu, False),
         ]
     if nome:
         tier2.append(("petz", _buscar_petz, True))
