@@ -617,8 +617,22 @@ def calcular_sugestao_with_monitoring(produto: Dict, politica: Dict, media_venda
             "sugestao_final": sugestao_quantidade
         })
 
-    # Garantir pelo menos 1 caixa se produto é vendido em caixa e tem sugestão > 0
     multiplicacao = False
+
+    # REGRA 8a: produto zerado com demanda no periodo → garante pelo menos 1 caixa
+    if estoque_atual == 0 and quantidade_vendida > 0 and sugestao_quantidade < itens_por_caixa:
+        sugestao_quantidade = itens_por_caixa
+        multiplicacao = True
+        rules.add_rule("ZERO_STOCK_DEMAND_PROTECTION",
+                      "Produto zerado com demanda no periodo - garantida 1 caixa minima",
+                      produto_id, data={
+                          "estoque_atual": estoque_atual,
+                          "quantidade_vendida_periodo": quantidade_vendida,
+                          "itens_por_caixa": itens_por_caixa,
+                          "quantidade_garantida": sugestao_quantidade
+                      })
+
+    # Regra existente: produto vendido em caixa garante 1 caixa
     unidade_produto = produto.get('unidade', 'UN').upper()
     eh_produto_caixa = unidade_produto not in ['UN', 'UNT']
 
@@ -1053,8 +1067,17 @@ def calcular_sugestao(produto: Dict, politica: Dict, media_venda_dia: float, qua
     else:
         sugestao_quantidade = round(sugestao_quantidade)
 
-    # Garantir pelo menos 1 caixa se produto é vendido em caixa e tem sugestão > 0
     multiplicacao = False
+
+    # REGRA 8a: produto zerado com demanda no periodo → garante pelo menos 1 caixa
+    # Resolve casos de baixa rotacao onde round() zerava a sugestao mesmo tendo
+    # havido vendas (ex: 3 vendas em 170 dias com prazo 22d). Para produtos
+    # unitarios (itens_por_caixa=1) isso garante 1 unidade.
+    if estoque_atual == 0 and quantidade_vendida > 0 and sugestao_quantidade < itens_por_caixa:
+        sugestao_quantidade = itens_por_caixa
+        multiplicacao = True
+
+    # Regra existente: produto vendido em caixa garante 1 caixa
     unidade_produto = produto.get('unidade', 'UN').upper()
     eh_produto_caixa = unidade_produto not in ['UN', 'UNT']
 

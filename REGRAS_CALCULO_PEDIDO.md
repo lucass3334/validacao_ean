@@ -259,6 +259,50 @@ SE produto é vendido em caixa (unidade ≠ UN, UNT) E sugestão > 0
 
 ---
 
+#### **REGRA 8a: Proteção de Demanda para Produto Zerado (NOVA)**
+
+**REGRA:** Produto com estoque zerado mas com vendas no período de cálculo recebe pelo menos 1 caixa, independente da unidade.
+
+```
+SE estoque_atual = 0
+   E quantidade_vendida_no_periodo > 0
+   E sugestao_arredondada < itens_por_caixa
+→ Força sugestao = itens_por_caixa
+```
+
+**Diferença para Regra 8:** A Regra 8 só protege produtos vendidos em caixa (CX, FD, PCT). A Regra 8a estende essa proteção para produtos unitários (UN) que estão zerados e tiveram demanda — garantindo pelo menos 1 unidade.
+
+**Exemplo: VIRBAC ENDOGARD CAES (caso real)**
+- Estoque atual: 0
+- Última venda: 21/03/2026 (3 unidades vendidas no período de 170 dias)
+- Última compra: 02/10/2025
+- Prazo de estoque (política): 22 dias
+- Itens por caixa: 1
+- Unidade: UN
+
+**ANTES (problema):**
+- Média diária: 3 ÷ 170 = 0.0176 un/dia
+- Sugestão base: (0.0176 × 22) - 0 = 0.387 un
+- Margem 25% (estoque zerado): 0.387 × 1.25 = 0.484 un
+- Arredondamento (caixa = 1): round(0.484) = **0**
+- Regra 8 não aplica (UN ≠ produto em caixa)
+- ❌ Produto **descartado**
+
+**AGORA (corrigido):**
+- ... mesmos cálculos até round = 0
+- **Regra 8a aplica:** estoque=0 AND vendas=3 (>0) AND sugestao=0 (<1)
+- → Força sugestão = 1 (itens_por_caixa)
+- ✅ Produto **incluído com qty=1**
+
+**Justificativa:** Produtos de baixa rotação (vendem 1 a cada 1-2 meses) ficavam invisíveis no pedido automático quando zeravam, mesmo com demanda comprovada. Isso causava ruptura silenciosa porque o lojista não percebia que precisava comprar.
+
+**Quando NÃO aplica:**
+- Produto com estoque atual > 0 (já está coberto)
+- Produto sem vendas no período (sem demanda comprovada → realmente não comprar)
+- Produto com sugestão arredondada já ≥ 1 caixa (regra existente já cobre)
+
+---
+
 #### **REGRA 9: Cálculo de Valores**
 
 ```
@@ -358,6 +402,7 @@ O sistema AUMENTA a compra nas seguintes situações:
 | 1 | Estoque = 0 | +25% | Risco de ruptura (produto zerado) |
 | 2 | Arredondamento de caixa | Sempre para CIMA | Nunca faltar por arredondamento |
 | 3 | Produto em caixa com sugestão > 0 | +1 caixa mínimo | Garantir quantidade mínima |
+| 4 | Estoque = 0 + venda no período + sugestão < 1 caixa | Força 1 caixa (≥ 1 unidade) | Não esquecer produtos zerados de baixa rotação |
 
 ---
 
@@ -576,6 +621,11 @@ Produtos com estoque e sem venda há mais de 90 dias são automaticamente descar
 ---
 
 ## 📅 HISTÓRICO DE ATUALIZAÇÕES
+
+**Versão 3.1 - Abril 2026**
+- ✅ Regra 8a: produto zerado com demanda recente recebe garantia de 1 caixa
+  (resolve casos de baixa rotação onde round() zerava a sugestão e o
+  produto saía silenciosamente do pedido automático)
 
 **Versão 3.0 - Janeiro 2025 (Alinhamento com Planilha Cliente)**
 - ✅ Removido descarte de produtos parados > 90 dias
